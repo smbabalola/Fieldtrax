@@ -1,0 +1,31 @@
+# File: backend/app/templates/account_locked.html
+{% extends "base_email.html" %}
+
+{% block title %}Account Security Alert{% endblock %}
+
+{% block content %}
+<p>Hello {{ user_name }},</p>
+<p>Your FieldTrax account has been temporarily locked due to multiple failed login attempts.</p>
+
+<div class="warning">
+    <h3>Account Lock Details:</h3>
+    <p><strong>Time:</strong> {{ locked_time }}</p>
+    <p><strong>Reason:</strong> {{ lock_reason }}</p>
+    <p><strong>Duration:</strong> {{ lock_duration }}</p>
+</div>
+
+<p>To unlock your account immediately, click the button below:</p>
+
+<div style="text-align: center;">
+    <a href="{{ unlock_link }}" class="button">Unlock Account</a>
+</div>
+
+<div class="info">
+    <p>If you don't recognize these login attempts, we recommend:</p>
+    <ul>
+        <li>Changing your password immediately</li>
+        <li>Enabling two-factor authentication</li>
+        <li>Reviewing your recent account activity</li>
+    </ul>
+</div>
+{% endblock %}
