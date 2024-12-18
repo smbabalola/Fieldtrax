@@ -1,0 +1,87 @@
+/* File: /frontend/src/styles/sidebar.css */
+.sidebar {
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
+}
+
+.sidebar.collapsed {
+  width: 60px !important;
+}
+
+.sidebar .nav-link {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+  transition: all 0.2s ease-in-out;
+}
+
+.sidebar .nav-link:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.sidebar .nav-link.active {
+  opacity: 1;
+  position: relative;
+}
+.sidebar {
+  position: relative;
+  transition: width 0.3s ease;
+  z-index: 1000;
+}
+
+.sidebar.closed .nav-link span {
+  display: none;
+}
+
+.sidebar .nav-link {
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar .nav-link:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+.job-sidebar {
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+}
+
+.job-sidebar.collapsed {
+  width: 60px !important;
+}
+
+.job-sidebar .nav-link {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.2s ease-in-out;
+}
+
+.job-sidebar .nav-link:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.job-sidebar .nav-link.active {
+  position: relative;
+}
+
+.job-sidebar .nav-link.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: var(--bs-primary);
+}
+
+@media (max-width: 768px) {
+  .sidebar, .job-sidebar {
+    width: 60px !important;
+  }
+  
+  .sidebar .nav-link span,
+  .job-sidebar .nav-link span {
+    display: none;
+  }
+}

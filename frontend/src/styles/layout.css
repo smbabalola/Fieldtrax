@@ -1,0 +1,95 @@
+/* File: /frontend/src/styles/layout.css */
+.main-sidebar,
+.job-sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: 1035;
+  transition: transform 0.3s ease-in-out, width 0.3s ease-in-out;
+  background-color: #fff;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+.main-sidebar {
+  width: 240px;
+  left: 0;
+}
+
+.main-sidebar.collapsed {
+  width: 60px;
+}
+
+.job-sidebar {
+  width: 200px;
+  background-color: #f8f9fa;
+}
+
+.job-sidebar.collapsed {
+  width: 50px;
+}
+
+.main-content {
+  min-height: 100vh;
+  transition: margin-left 0.3s ease-in-out;
+  background-color: #f8f9fa;
+}
+
+/* Responsive Styles */
+@media (max-width: 768px) {
+  .main-sidebar,
+  .job-sidebar {
+    transform: translateX(-100%);
+  }
+
+  .main-sidebar.expanded,
+  .job-sidebar.expanded {
+    transform: translateX(0);
+  }
+
+  .main-content {
+    margin-left: 0 !important;
+  }
+}
+
+/* Sidebar Toggle Button */
+.sidebar-toggle {
+  position: absolute;
+  top: 1rem;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  background-color: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1036;
+  transition: transform 0.3s ease-in-out;
+}
+
+.sidebar-toggle:hover {
+  transform: scale(1.1);
+}
+
+/* Sidebar Content */
+.sidebar-content {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Hide scrollbar for cleaner look */
+.sidebar-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.sidebar-content::-webkit-scrollbar-track {
+  background-color: transparent;
+}

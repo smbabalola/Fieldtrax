@@ -1,0 +1,19 @@
+/* File: /frontend/src/App.css */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.loading-screen {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+.loading-screen h2 {
+  margin-top: 1rem;
+  color: #333;
+}

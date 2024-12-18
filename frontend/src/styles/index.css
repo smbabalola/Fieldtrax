@@ -1,0 +1,9 @@
+/* File: /frontend/src/styles/index.css */
+@import 'bootstrap/dist/css/bootstrap.min.css';
+@import 'bootstrap-icons/font/bootstrap-icons.css';
+
+/* Custom icon styles */
+.bi {
+  display: inline-block;
+  vertical-align: -0.125em;
+}

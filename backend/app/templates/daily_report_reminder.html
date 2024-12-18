@@ -1,0 +1,24 @@
+# File: backend/app/templates/daily_report_reminder.html
+{% extends "base_email.html" %}
+
+{% block title %}Daily Report Reminder{% endblock %}
+
+{% block content %}
+<p>Hello {{ user_name }},</p>
+<p>This is a reminder to submit your daily report for {{ job_name }}.</p>
+
+<div class="info">
+    <h3>Report Details:</h3>
+    <p><strong>Job ID:</strong> {{ job_id }}</p>
+    <p><strong>Date:</strong> {{ report_date }}</p>
+    <p><strong>Due By:</strong> {{ due_time }}</p>
+</div>
+
+<div class="warning">
+    <p>Please note that daily reports are required to be submitted by {{ due_time }} each day.</p>
+</div>
+
+<div style="text-align: center;">
+    <a href="{{ report_link }}" class="button">Submit Daily Report</a>
+</div>
+{% endblock %}

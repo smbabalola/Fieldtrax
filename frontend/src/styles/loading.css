@@ -1,0 +1,10 @@
+/* File: /frontend/src/styles/loading.css */
+.loading-container {
+    min-height: 100vh;
+    background-color: #f8f9fa;
+  }
+  
+  .loading-container .spinner-border {
+    width: 3rem;
+    height: 3rem;
+  }

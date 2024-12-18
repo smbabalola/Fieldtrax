@@ -1,0 +1,61 @@
+/* src/components/jobs/JobsTable.css */
+.table-container {
+    overflow-x: auto;
+  }
+  
+  .hover-bg:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+  }
+  
+  .table-row {
+    cursor: pointer;
+  }
+  
+  .cursor-pointer {
+    cursor: pointer;
+  }
+  
+  .table td, 
+  .table th {
+    vertical-align: middle;
+  }
+  
+  .checkbox-column {
+    width: 40px;
+  }
+  
+  .table-cell-content {
+    padding: 0.75rem;
+  }
+  
+  .status-badge {
+    font-size: 0.875rem;
+    padding: 0.25rem 0.5rem;
+  }
+  
+  /* Loading spinner styles */
+  .spinner-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 2rem;
+  }
+  
+  /* Empty state styles */
+  .empty-state {
+    text-align: center;
+    padding: 2rem;
+    color: #6c757d;
+  }
+  
+  /* Responsive table adjustments */
+  @media (max-width: 768px) {
+    .table-container {
+      margin: 0 -1rem;
+    }
+    
+    .table td, 
+    .table th {
+      white-space: nowrap;
+    }
+  }

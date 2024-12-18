@@ -1,0 +1,107 @@
+/* File: /frontend/src/styles/dashboard.css */
+.wrapper {
+    min-height: 100vh;
+  }
+  
+  .main-content {
+    margin-left: 250px;
+    transition: margin-left 0.3s ease;
+    background-color: #f8f9fa;
+  }
+  
+  .main-content.collapsed {
+    margin-left: 70px;
+  }
+  
+  .navbar {
+    height: 60px;
+    background-color: white !important;
+  }
+  
+  .navbar-brand {
+    font-weight: 600;
+  }
+  
+  .content {
+    padding-top: 20px;
+  }
+  
+  /* Sidebar toggle animation */
+  .sidebar-toggle {
+    transition: transform 0.3s ease;
+  }
+  
+  .sidebar-toggle.collapsed {
+    transform: rotate(180deg);
+  }
+  
+  /* User profile styles */
+  .user-avatar {
+    width: 35px;
+    height: 35px;
+    background-color: #007bff; /* Example primary color */
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+  }
+  
+  /* Dropdown menu enhancements */
+  .dropdown-menu {
+    padding: 0.5rem 0;
+    margin-top: 0.5rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+  }
+  
+  .dropdown-item {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+  }
+  
+  .dropdown-item i {
+    width: 20px;
+  }
+  
+  .dropdown-header {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  
+  /* Notification badge */
+  .badge {
+    font-size: 0.65rem;
+    padding: 0.25em 0.5em;
+  }
+  
+  /* Quick action buttons */
+  .btn-outline-primary {
+    border-width: 1.5px;
+  }
+  
+  /* Modal customization */
+  .modal-content {
+    border-radius: 0.5rem;
+    border: none;
+  }
+  
+  .modal-header {
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+  }
+  
+  .modal-footer {
+    border-top: 1px solid rgba(0,0,0,0.1);
+  }
+  
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .main-content {
+      margin-left: 0;
+    }
+    
+    .main-content.collapsed {
+      margin-left: 0;
+    }
+  }
