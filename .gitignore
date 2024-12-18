@@ -23,6 +23,9 @@ wheels/
 .coverage
 htmlcov/
 venv/
+venv-*/
+**/__pycache__
+*.pyc
 env/
 
 # Node
