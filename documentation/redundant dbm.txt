@@ -1,0 +1,738 @@
+def create_backload(request, db):
+    new_backload = models.Backload(
+        wellbore_id = request.wellbore_id,
+        sheet_number = request.sheet_number,
+        date = request.date,
+        destination = request.destination,
+        total_weight_value = request.total_weight_value,
+        total_weight_unit = request.total_weight_unit,
+        transportation_details = request.transportation_details,
+        status = request.status,
+        approved_by = request.approved_by,
+        )
+    db.add(new_backload)
+    db.commit()
+    db.refresh(new_backload)
+    return new_backload
+
+def create_contract_type(request, db):
+    new_contract_type = models.ContractType(
+        contract_type = request.contract_type,
+        description = request.description
+        )
+    db.add(new_contract_type)
+    db.commit()
+    db.refresh(new_contract_type)
+    return new_contract_type
+
+def create_contractor(request, db):
+    new_contractor = models.Contractor(
+        contractor_name = request.contractor_name,
+        address_1 = request.address_1,
+        address_2 = request.address_2,
+        post_code = request.post_code,
+        zipcode = request.zipcode,
+        phone_no_1 = request.phone_no_1,
+        phone_no_2 = request.phone_no_2,
+        state = request.state,
+        country = request.country,
+        )
+    db.add(new_contractor)
+    db.commit()
+    db.refresh(new_contractor)
+    return new_contractor
+
+def create_daily_report(request, db):
+    new_daily_report = models.DailyReport(
+        wellbore_id = request.wellbore_id,
+        report_date = request.report_date,
+        created_at = request.created_at,
+        updated_at = request.updated_at
+        )
+    db.add(new_daily_report)
+    db.commit()
+    db.refresh(new_daily_report)
+    return new_daily_report
+
+def create_field(request, db):
+    new_field = models.Field(
+        field_name = request.field_name,
+        lease_name = request.lease_name,
+        country = request.country,
+        state = request.state,
+        area = request.area,
+	    # [updated_by] [nvarchar](50) NULL,
+        date_last_updated = request.date_last_updated
+        )
+    db.add(new_field)
+    db.commit()
+    db.refresh(new_field)
+    return new_field
+
+def create_fluid(request, db):
+    new_fluid = models.Fluid(
+        wellbore_id = request.wellboire_id,
+        fluid_type = request.fluid_type,
+        volume_value = request.volume_value,
+        volume_unit =  request.volume_unit,
+        density_value = request.density_value,
+        density_unit = request.density_unit,
+        viscosity_value = request.viscosity_value,
+        viscosity_unit = request.viscosity_value,
+        description = request.description,
+        timestamp = request.timestamp
+        )
+    db.add(new_fluid)
+    db.commit()
+    db.refresh(new_fluid)
+    return new_fluid
+
+def create_hanger_info(request, db):
+    new_hanger_info = models.HangerInfo(
+        wellbore_id = request.wellbore_id,
+        type = request.type,
+        burst_rating = request.burst_rating,
+        tensile_rating = request.tensile_rating,
+        hanging_capacity = request.hanging_capacity,
+        hydraulic_setting_pressure = request.hydraulic_setting_pressure,
+        )
+    db.add(new_hanger_info)
+    db.commit()
+    db.refresh(new_hanger_info)
+    return new_hanger_info
+
+def create_installation_type(request, db):
+    new_hanger_info = models.InstallationType(
+        Installation_type = request.installation_type,
+        description = request.description
+        )
+    db.add(new_hanger_info)
+    db.commit()
+    db.refresh(new_hanger_info)
+    return new_hanger_info
+
+def create_installation_type(request, db):
+    new_hanger_info = models.Installation(
+    field_id = request.field_id,
+    installation_name = request.installation_name,
+    installation_type_id = request.installation_type_id,
+    field_block = request.field_block,
+    water_depth = request.water_depth,
+	# [updated_by] [int] NOT NULL,
+    date_last_updated = request.date_last_updated
+    )
+    db.add(new_hanger_info)
+    db.commit()
+    db.refresh(new_hanger_info)
+    return new_hanger_info
+
+
+
+def create_job(request, db):
+    new_job = models.Job(
+    jobcenter_id = request.jobcenter_id,
+    well_name = request.well_name,
+    po_number = request.po_number,
+    company_code = request.company_code,
+    service_code = request.service_code,
+    rig_id = request.rig_id,
+    country = request.country,
+    field = request.field,
+    measured_depth = request.measured_depth,
+    total_vertical_depth = request.total_vertical_depth,
+    spud_date = request.spud_date,
+    status = request.status,
+    mobilization_date = request.mobilization_date,
+    demobilization_date = request.demobilization_date,
+    created_at = request.created_at,
+    updated_at = request.updated_at,
+    job_closed = request.job_closed,
+    trainingfile = request.trainingfile,
+        )
+    db.add(new_job)
+    db.commit()
+    db.refresh(new_job)
+    return new_job
+
+def create_job_center(request, db):
+    new_job_center = models.JobCenter(
+        # slot_id = request.slot_id,
+        well_name = request.well_name,
+        short_name = request.short_name,
+        api_number = request.api_number,
+        spud_date = request.spud_date,
+        well_class_id = request.well_class_id,
+        production_id = request.production_id,
+        well_shape_id = request.well_shape_id,
+        utm_eastings = request.utm_eastings,
+        utm_northings = request.utm_northings,
+        latitude = request.latitude,
+        longitude = request.longitude,
+        water_depth = request.water_depth,
+        district = request.district,
+        address_1 = request.address_1,
+        address_2 = request.address_2,
+        post_code = request.post_code ,
+        county = request.county,
+        country = request.country,
+        updated_by = request.updated_by,
+        date_last_updated = request.date_last_updated,
+        )
+    db.add(new_job_center)
+    db.commit()
+    db.refresh(new_job_center)
+    return new_job_center
+
+def create_job_log(request, db):
+    new_job_log = models.JobLog(
+        job_id = request.job_id,
+        timestamp = request.timestamp,
+        activity_type = request.activity_type,
+        description = request.description,
+        duration = request.duration
+        )
+    db.add(new_job_log)
+    db.commit()
+    db.refresh(new_job_log)
+    return new_job_log
+
+def create_mud_equipment(request, db):
+    new_mud_equipment = models.MudEquipment(
+        rig_id = request.rig_id,
+        equipment_name = request.equipment_name,
+        serial_number = request.serial_naumber,
+        manufacturer = request.manufacturer,
+        model= request.model
+        )
+    db.add(new_mud_equipment)
+    db.commit()
+    db.refresh(new_mud_equipment)
+    return new_mud_equipment
+
+def create_mud_equipment_detail(request, db):
+    new_mud_equipment_detail = models.UserSession(
+        report_id = request.report_id,
+        mud_equipment_id = request.mud_equipment_id,
+        hours_run =request.hours_run,
+        screen_sizes = request.screen_sizes,
+        active_volume_lost = request.active_volume_lost,
+        reserve_volume_lost = request.reserve_volume_lost,
+        other = request.other,
+        )
+    db.add(new_mud_equipment_detail)
+    db.commit()
+    db.refresh(new_mud_equipment_detail)
+    return new_mud_equipment_detail
+
+def create_mud_pump(request, db):
+    new_mud_pump = models.UserSession(
+        rig_id = request.rig_id,
+        serial_number = request.serial_number,
+        stroke_length = request.stroke_length,
+        max_pressure = request.max_pressure,
+        power_rating = request.power_rating,
+        manufacturer = request.manufacturer,
+        model = request.model,
+        efficiency = request.efficiency,
+        pump_type = request.pump_type,
+        )
+    db.add(new_mud_pump)
+    db.commit()
+    db.refresh(new_mud_pump)
+    return new_mud_pump
+
+def create_mud_pump_detail(request, db):
+    new_mud_pump_detail = models.MudPumpDetail(
+        report_id = request.report_id,
+        mud_pump_id = request.mud_pump-id,
+        circulation_rate = request.circulation_rate,
+        for_hole = request.for_hole,
+        )
+    db.add(new_mud_pump_detail)
+    db.commit()
+    db.refresh(new_mud_pump_detail)
+    return new_mud_pump_detail
+
+def create_operational_parameter(request, db):
+    new_operational_parameter = models.OperationalParameter(
+        wellbore_id = request.wellbore_id,
+        zone = request.zone,
+        wiper_trip = request.wiper_trip,
+        returns_running_liner = request.returns_running_liner,
+        reamed = request.reamed,
+        liner_to_target = request.liner_to_target,
+        ball_seat_function = request.ball_seat_function,
+        hanger_function = request.hanger_function,
+        overpull_after_release = request.overpull_after_release,
+        surface_equipment_function = request.surface_equipment_function,
+        returns_cementing = request.returns_cementing,
+        packer_function = request.packer_function,
+        hanger_bearing_function = request.hanger_bearing_function,
+        plug_system_function = request.plug_system_function,
+        mud_type = request.mud_type,
+        lcm_mud = request.lcm_mud,
+        lcm_conc = request.lcm_conc,
+        lcm_formulation = request.lcm_formulation,
+        spacer_type = request.spacer_type,
+        pdp_latch = request.pdp_latch,
+        pdp_latch_at_calculated = request.pdp_latch_at_calculated,
+        lwp_bump = request.lwp_bump,
+        lwp_bump_at_calculated = request.lwp_bump_at_calculated,
+        plug_bump_pressure = request.plug_bump_pressure,
+        hrde_mech_released = request.hrde_mech_released,
+        pbr_filled_with = request.pbr_filled_with,
+        reciprocate_string_during_cmt = request.reciprocate_string_during_cmt,
+        rotated_while_setting_packer = request.rotated_while_setting_packer,
+        h2s_present = request.h2s_present,
+        )
+    db.add(new_operational_parameter)
+    db.commit()
+    db.refresh(new_operational_parameter)
+    return new_operational_parameter
+
+def create_operator(request, db):
+    new_operator = models.Operator(
+        operator_name = request.operator_name,
+        company_code = request.company_code,
+        address_1 = request.address_1,
+        address_2 = request.address-2,
+        post_code = request.post_code,
+        zipcode = request.zipcode,
+        phone_no_1 = request.phone_no_1,
+        phone_no_2 = request.phone_no_2,
+        state = request.state,
+        country = request.country
+    )
+    db.add(new_operator)
+    db.commit()
+    db.refresh(new_operator)
+    return new_operator
+
+def create_password_reset(request, db):
+    new_password_reset = models.PasswordReset(
+        user_id = request.user_id,
+        token = request.token,
+        is_used = request.is_used,
+        created_at = request.created_at,
+        expires_at = request.expires_at
+    )
+    db.add(new_password_reset)
+    db.commit()
+    db.refresh(new_password_reset)
+    return new_password_reset
+
+def create_physical_barrier(request, db):
+    new_physical_barrier = models.PhysicalBarrier(
+        wellbore_id = request.wellbore_id,
+        job_id = request.job_id,
+        barrier_type = request.barrier_type,
+        depth_value = request.depth_value,
+        depth_unit = request.depth_unit,
+        length_value = request.length_value,
+        length_unit = request.length_unit,
+        pressure_rating_value = request.pressure_rating_value,
+        pressure_rating_unit = request.pressure_ratimg_unit,
+        installation_date = request.installation_date,
+        installed_by = request.installed_by,
+        verified_by = request.verified_by,
+        verification_date  = request.verification_date
+        )
+    db.add(new_physical_barrier)
+    db.commit()
+    db.refresh(new_physical_barrier)
+    return new_physical_barrier
+
+def create_production(request, db):
+    new_production = models.Production(
+        production_type = request.production_type,
+        description = request.description
+        )
+    db.add(new_production)
+    db.commit()
+    db.refresh(new_production)
+    return new_production
+
+def create_rig_equipment(request, db):
+    new_rig_equipment = models.RigEquipment(
+        rig_id = request.rig_id,
+        derrick_height = request.derrick_height,
+        derrick_rating = request.derrick_rating,
+        derrick_manufacturer = request.derrick_manufacturer,
+        rig_model = request.rig_model,
+        rig_power = request.rig_power,
+        travel_equipment_weight = request.travel_equipment_weight,
+        kelly_manufacturer = request.kelly_manufacturer,
+        kelly_type = request.kelly_type,
+        kelly_length = request.kelly_length,
+        kelly_weight = request.kelly_weight,
+        kelly_internal_diameter = request.kelly_internal_diameter,
+        surface_pipe_one_id = request.surface_pipe_one_id,
+        surface_pipe_one_length = request.surface_pipe_one_length,
+        surface_pipe_one_pressure_rating = request.surface_pipe_one_pressure_rating,
+        surface_pipe_two_id = request.surface_pipe_two_id,
+        surface_pipe_two_length = request.surface_pipe_two_length,
+        surface_pipe_two_pressure_rating = request.surface_pipe_two_pressure_rating,
+        stand_pipe_id = request.stand_pipe_id,
+        stand_pipe_length = request.stand_pipe_length,
+        stand_pipe_pressure_rating = request.stand_pipe_pressure_rating,
+        kelly_hose_id = request.kelly_hose_id,
+        kelly_hose_length = request.kelly_hose_length,
+        kelly_hose_pressure_rating = request.kelly_hose_pressure_rating
+        )
+    db.add(new_rig_equipment)
+    db.commit()
+    db.refresh(new_rig_equipment)
+    return new_rig_equipment
+
+def create_rig(request, db):
+    new_rig = models.Rig(
+        rig_name = request.rig_name,
+        contractor_id = request.contractor_id,
+        contractor_name = request.contractor_name,
+        air_gap = request.air_gap,
+        rig_type_id = request.rig_type_id,       
+        )
+    db.add(new_rig)
+    db.commit()
+    db.refresh(new_rig)
+    return new_rig
+
+def create_rig_stability(request, db):
+    new_rig_stability = models.RigStability(
+            rig_id = request.rig_id,
+            max_deck_load_op_draft = request.max_deck_load_op_draft,
+            max_deck_load_survival_draft = request.max_deck_load_survival_draft,
+            max_deck_load_transit_draft = request.max_deck_load_transit_draft,
+            max_deck_load_water_depth = request.max_deck_load_water_depth,
+            number_thrusters = request.number_thrusters,
+            thruster_power = request.thruster_power,
+            number_anchors = request.number_anchors,
+            number_riser_tensioners = request.number_riser_tensioners,
+            number_guideline_tensioners = request.number_guideline_tensioners      
+        )
+    db.add(new_rig_stability)
+    db.commit()
+    db.refresh(new_rig_stability)
+    return new_rig_stability
+
+def create_rotary_equipment(request, db):
+    new_rotary_equipment = models.RotaryEquipment(
+        rig_id = request.rig_id,
+        top_drive_manufacturer = request.rig_id,
+        top_drive_model = request.top_drive_model,
+        top_drive_power_rating = request.top_drive_power_rating,
+        top_drive_torque_rating = request.top_drive_torque_rating,
+        top_drive_weight = request.top_drive_weight,
+        rotary_table_manufacturer = request.rotary_table_manufacturer,
+        rotary_table_model = request.rotary_table_model,
+        rotary_table_power_rating = request.rotary_table_power_rating,
+        rotary_table_torque_rating = request.rotary_table_torque_rating,
+        )
+    db.add(new_rotary_equipment)
+    db.commit()
+    db.refresh(new_rotary_equipment)
+    return new_rotary_equipment
+
+def create_run_parameter(request, db):
+    new_run_parameter = models.RunParameter(
+        wellbore_id = request.wellbore_id,
+        wiper_plug_pressure_rating = request.wiper_plug_pressure_rating,
+        wiper_plug_temperature_rating = request.wiper_plug_temperature_rating,
+        setting_tool_tensile = request.setting_tool_tensile,
+        bumper_jar_tensile = request.bumper_jar_tensile,
+        surface_equipment_tensile = request.surface_equipment_tensile,
+        pickup_dogs = request.pickup_dogs,
+        pickup_pack_off = request.pickup_pack_off,
+        shear_hrde_mech_release = request.shear_hrde_mech_release,
+        make_up_torque_weak_link = request.make_up_torque_weak_link,
+        weight_applied_packer_test = request.weight_applied_packer_test,
+        liner_top_deviation = request.liner_top_deviation,
+        ball_seat_type = request.ball_seat_type,
+        pack_off_type = request.pack_off_type   
+        )
+    db.add(new_run_parameter)
+    db.commit()
+    db.refresh(new_run_parameter)
+    return new_run_parameter
+
+def create_seal_assembly(request, db):
+    new_seal_assembly = models.SealAssembly(
+        wellbore_id = request.wellbore_id,
+        seal_surface_od = request.seal_surface_od,
+        body_burst = request.body_burst,
+        collapse = request.collapse,
+        tensile = request.tensile,
+        tieback_extension_id = request.tieback_extension_id,
+        tieback_extension_burst = request.tieback_extension_burst,
+        tieback_extension_collapse = request.tieback_extension_collapse,
+        tieback_yield_collapse = request.tieback_yield_collapse,
+        setting_force = request.setting_force,
+        hold_down_slips = request.hold_down_slips,
+        element_rating = request.element_rating,
+        slick_stinger_od = request.slick_stinger_od,  
+              
+        )
+    db.add(new_seal_assembly)
+    db.commit()
+    db.refresh(new_seal_assembly)
+    return new_seal_assembly
+
+def create_slot(request, db):
+    new_slot = models.Slot(
+    installation_id = request.installation_id,
+    slot_name = request.slot_name,
+    utm_eastings = request.utm_eastings,
+    utm_northings = request.utm_northings,
+    longitude = request.longitude,
+    latitude = request.latitude
+        )
+    db.add(new_slot)
+    db.commit()
+    db.refresh(new_slot)
+    return new_slot
+
+def create_tally(request, db):
+    new_tally = models.Tally(
+        wellbore_id = request.wellbore_id,
+        tally_type = request.tally_type,
+        date = request.date,
+        total_length_value = request.total_length_value,
+        total_length_unit = request.total_length_unit,
+        total_weight_value = request.total_weight_value,
+        total_weight_unit = request.total_weight_unit,
+        created_by = request.created_by,
+        verified_by = request.verified_by,        
+        )
+    db.add(new_tally)
+    db.commit()
+    db.refresh(new_tally)
+    return new_tally
+
+def create_tally_item(request, db):
+    new_tally_item = models.TallyItem(
+        tally_id = request.tally_id,
+        length_value = request.length_value,
+        length_unit = request.length_unit,
+        outer_diameter_value = request.outer_diameter_value,
+        outer_diameter_unit = request.outer_diameter_unit,
+        inner_diameter_value = request.inner_diameter_value,
+        inner_diameter_unit = request.inner_diameter_unit,
+        weight_per_unit_value = request.weight_per_unit_value,
+        weight_per_unit_unit = request.weight_per_unit_unit,
+        description = request.description,
+        serial_number = request.serial_number,       
+        )
+    db.add(new_tally_item)
+    db.commit()
+    db.refresh(new_tally_item)
+    return new_tally_item
+
+def create_tank(request, db):
+    new_tank = models.Tank(
+            rig_id  = request.rig_id,
+            tank_name = request.tank_name,
+            capacity = request.capacity,
+            shape = request.shape,
+            length = request.lenth,
+            height = request.height,
+            width_top = request.width_top,
+            width_bottom = request.wide_bottom,
+        )
+    db.add(new_tank)
+    db.commit()
+    db.refresh(new_tank)
+    return new_tank
+
+def create_time_sheet(request, db):
+    new_time_sheet = models.TimeSheet(
+        user_id = request.user_id,
+        access_token = request.access_token,
+        refresh_token = request.refresh_token,
+        expires_at = request.expires_at,
+        created_at = request.created_at,
+        last_activity = request.last_activity,
+        is_active = request.is_active,
+        device_info = request.device_info,
+        ip_address =  request.ip_address,        
+        )
+    db.add(new_time_sheet)
+    db.commit()
+    db.refresh(new_time_sheet)
+    return new_time_sheet
+
+def create_trajectory(request, db):
+    new_trajectory = models.Trajectory(
+        wellbore_id = request.wellbore_id,
+        measured_depth = request.measured_depth,
+        inclination = request.inclination,
+        azimuth = request.azimuth,
+        )
+    db.add(new_trajectory)
+    db.commit()
+    db.refresh(new_trajectory)
+    return new_trajectory
+
+def create_tubular(request, db):
+    new_tubular = models.Tubular(
+        tubulartype_id = request.tubulartype_id,
+        outer_diameter = request.outer_diameter,
+        inner_diameter = request.inner_diameter,
+        weight = request.weight,
+        yield_strength = request.yield_strength,
+        capacity = request.capacity,
+        volume = request.volume,
+        thread = request.thread,
+        burst = request.burst,
+        collapse = request.collapse,
+        drift = request.drift,
+        oh_diameter = request.oh_diameter,
+        liner_Overlap = request.liner_Overlap,
+        start_depth = request.start_depth,
+        end_depth = request.end_depth,
+        liner_top_depth = request.liner_top_depth
+        )
+    db.add(new_tubular)
+    db.commit()
+    db.refresh(new_tubular)
+    return new_tubular
+
+def create_tubular_type(request, db):
+    new_tubular_type = models.TubularType(
+        type = request.type,
+        type_short = request.type_short,
+        description = request.description
+        )
+    db.add(new_tubular_type)
+    db.commit()
+    db.refresh(new_tubular_type)
+    return new_tubular_type
+
+def create_user(request, db):
+    new_user = models.User(
+        username = request.username,
+        email = request.email,
+        full_name = request.full_name,
+        password = Hash.bcrypt(request.password),
+        # is_active: Optional[bool] = None
+        # is_verified: Optional[bool] = None
+        # verification_token: Optional[str] = None
+        created_at = request.created_at
+        )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+def create_user_session(request, db):
+    new_user_session = models.UserSession(
+        user_id = request.user_id,
+        access_token = request.access_token,
+        refresh_token = request.refresh_token,
+        expires_at = request.expires_at,
+        created_at = request.created_at,
+        last_activity = request.last_activity,
+        is_active = request.is_active,
+        device_info = request.device_info,
+        ip_address =  request.ip_address,        
+        )
+    db.add(new_user_session)
+    db.commit()
+    db.refresh(new_user_session)
+    return new_user_session
+
+def create_well_control_equipment(request, db):
+    new_well_control_equipment = models.WellControlEquipment(
+        rig_id = request.rig_id,
+        choke_line_diameter = request.choke_line_diameter,
+        choke_line_pressure = request.choke_line_pressure,
+        kill_line_diameter = request.kill_line_diameter,
+        bop_size = request.bop_size,
+        bop_max_pressure = request.bop_max_pressure,
+        bop_max_temperature = request.bop_max_temperature,
+        diverter_manufacturer = request.diverter_manufacturer,
+        diverter_model = request.diverter_model,
+        line_number = request.line_number,
+        internal_diameter = request.internal_diameter,
+        max_pressure = request.max_pressure,
+        line_length = request.line_length,
+        closing_time = request.closing_time,      
+        )
+    db.add(new_well_control_equipment)
+    db.commit()
+    db.refresh(new_well_control_equipment)
+    return new_well_control_equipment
+
+def create_well(request, db):
+    new_well = models.Well(
+        slot_id = request.slot_id,
+        well_name = request.well_name,
+        short_name = request.short_name,
+        api_number = request.api_number,
+        spud_date = request.spud_date,
+        well_type_id = request.well_type_id,
+        production_id = request.production_id,
+        well_shape_id = request.well_shape_id,
+        utm_eastings = request.utm_eastings,
+        utm_northings = request.utm_northings,
+        latitude = request.latitude,
+        longitude = request.longitude,
+        measured_depth = request.measured_depth,
+        total_vertical_depth = request.total_vertical_depth
+        )
+    db.add(new_well)
+    db.commit()
+    db.refresh(new_well)
+    return new_well
+
+def create_wellbore(request, db):
+    new_wellbore = models.Wellbore(
+        job_id = request.job_id, 
+        well_id = request.well_id,
+        short_name = request.short_name,
+        wellbore_name = request.wellbore_name,
+        description = request.description,
+        wellbore_number = request.wellbore_number,
+        # contract_type_id = request.contract_type_id,
+        start_date = request.start_date,
+        end_date = request.end_date,
+        primary_currency = request.primary_currency,
+        secondary_currency = request.secondary_currency,
+        planned_start_date = request.planned_start_date,
+        Planned_days = request.Planned_days,
+        Planned_well_cost = request.Planned_well_cost,
+        actual_well_cost = request.actual_well_cost  
+        )
+    db.add(new_wellbore)
+    db.commit()
+    db.refresh(new_wellbore)
+    return new_wellbore
+
+def create_well_shape(request, db):
+    new_well_shape = models.WellShape(
+        well_shape = request.well_shape,
+        description = request.description
+        )
+    db.add(new_well_shape)
+    db.commit()
+    db.refresh(new_well_shape)
+    return new_well_shape
+
+def create_well_type(request, db):
+    new_well_type = models.WellType(
+        well_type_name = request.well_type_name,
+        description = request.description
+        )
+    db.add(new_well_type)
+    db.commit()
+    db.refresh(new_well_type)
+    return new_well_type
+
+def create_well_geometry(request, db):
+    new_well_geometry = models.WellboreGeometry(
+        wellbore_id = request.wellbore_id,
+        tubular_id = request.tubular_id
+        )
+    db.add(new_well_geometry)
+    db.commit()
+    db.refresh(new_well_geometry)
+    return new_well_geometry

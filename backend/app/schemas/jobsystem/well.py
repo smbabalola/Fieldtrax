@@ -11,13 +11,17 @@ class WellBase(TimeStampSchema):
     slot_id: str = Field(..., max_length=50)
     well_name: str = Field(..., min_length=1, max_length=100)
     short_name: Optional[str] = Field(None, max_length=50)
+    formation_type: Optional[str] = Field(None, max_length=50)
     api_number: Optional[str] = Field(None, max_length=20)
     spud_date: Optional[datetime] = None
+    operator_id: Optional[str] = Field(None, max_length=50)
     well_type_id: Optional[str] = Field(None, max_length=50)
     production_id: Optional[str] = Field(None, max_length=50)
     well_shape_id: Optional[str] = Field(None, max_length=50)
     measured_depth: float = Field(default=0, ge=0)
     total_vertical_depth: float = Field(default=0, ge=0)
+    h2s: Optional[bool] = None
+    co2: Optional[bool] = None
         
 
 
@@ -26,13 +30,17 @@ class WellCreate(WellBase):
     slot_id: str = Field(..., max_length=50)
     well_name: str = Field(..., min_length=1, max_length=100)
     short_name: Optional[str] = Field(None, max_length=50)
+    formation_type: Optional[str] = Field(None, max_length=50)
     api_number: Optional[str] = Field(None, max_length=20)
     spud_date: Optional[datetime] = None
+    operator_id: Optional[str] = Field(None, max_length=50)
     well_type_id: Optional[str] = Field(None, max_length=50)
     production_id: Optional[str] = Field(None, max_length=50)
     well_shape_id: Optional[str] = Field(None, max_length=50)
     measured_depth: float = Field(default=0, ge=0)
     total_vertical_depth: float = Field(default=0, ge=0)
+    h2s: Optional[bool] = None
+    co2: Optional[bool] = None
         
     class Config:
         json_encoders = {
@@ -43,13 +51,17 @@ class WellUpdate(WellBase):
     slot_id: Optional[str] = Field(None, max_length=50)
     well_name: Optional[str] = Field(None, min_length=1, max_length=100)
     short_name: Optional[str] = Field(None, max_length=50)
+    formation_type: Optional[str] = Field(None, max_length=50)
     api_number: Optional[str] = Field(None, max_length=20)
     spud_date: Optional[datetime] = None
+    operator_id: Optional[str] = Field(None, max_length=50)
     well_type_id: Optional[str] = Field(None, max_length=50)
     production_id: Optional[str] = Field(None, max_length=50)
     well_shape_id: Optional[str] = Field(None, max_length=50)
     measured_depth: Optional[float] = Field(None, ge=0)
     total_vertical_depth: Optional[float] = Field(None, ge=0)
+    h2s: Optional[bool] = None
+    co2: Optional[bool] = None  
 
 class WellResponse(WellBase):
     id: str

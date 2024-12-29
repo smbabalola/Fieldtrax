@@ -1,61 +1,14 @@
-// src/services/fluidService.js
-import apiRequest, { handleApiError } from '../utils/apiUtils';
-
-const BASE_URL = '/fluids';
+// File: /src/services/fluidService.js
+import api, { API_ENDPOINTS } from './api';
 
 const fluidService = {
-  getFluids: async (wellboreId) => {
-    try {
-      const response = await apiRequest.get(`${BASE_URL}/wellbore/${wellboreId}`, {
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      });
-      return response;
-    } catch (error) {
-      handleApiError(error, 'Error fetching fluids');
-    }
-  },
-
-  getFluidTypes: async (wellboreId, fluidType) => {
-    try {
-      const response = await apiRequest.get(`${BASE_URL}/wellbore/${wellboreId}/type/${fluidType}`, {
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-      return response;
-    } catch (error) {
-      handleApiError(error, 'Error fetching fluid types');
-    }
-  },
-
-  createFluid: async (fluidData) => {
-    try {
-      const response = await apiRequest.post(BASE_URL, fluidData, {
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-      return response;
-    } catch (error) {
-      handleApiError(error, 'Error creating fluid');
-    }
-  },
-
-  updateFluid: async (fluidId, fluidData) => {
-    try {
-      const response = await apiRequest.put(`${BASE_URL}/${fluidId}`, fluidData, {
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-      return response;
-    } catch (error) {
-      handleApiError(error, 'Error updating fluid');
-    }
-  }
+  getByWellbore: (wellboreId) => api.get(API_ENDPOINTS.fluids.getByWellbore(wellboreId)),
+  getByType: (wellboreId, fluidType) => api.get(API_ENDPOINTS.fluids.getByType(wellboreId, fluidType)),
+  getByDateRange: (startDate, endDate) => api.get(API_ENDPOINTS.fluids.getByDateRange(startDate, endDate)),
+  getByCountry: (country) => api.get(API_ENDPOINTS.fluids.getByCountry(country)),
+  create: (data) => api.post(API_ENDPOINTS.fluids.create, data),
+  update: (id, data) => api.put(API_ENDPOINTS.fluids.update(id), data),
+  delete: (id) => api.delete(API_ENDPOINTS.fluids.delete(id))
 };
 
 export default fluidService;

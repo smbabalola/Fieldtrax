@@ -1,10 +1,10 @@
-// File: /frontend/src/pages/LoginPage.jsx
+// File: /src/pages/LoginPage.jsx
 import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, Link } from 'react-router-dom';
 import { Form, Button, Card, Container, Alert, Spinner } from 'react-bootstrap';
 import { loginStart, loginSuccess, loginFailure } from '../store/slices/authSlice';
-import axios from '../utils/axios';
+import api from '../services/api';
 
 const LoginPage = () => {
     const dispatch = useDispatch();
@@ -18,7 +18,6 @@ const LoginPage = () => {
     const [validationErrors, setValidationErrors] = useState({});
     const [showPassword, setShowPassword] = useState(false);
 
-    // Redirect if already authenticated
     useEffect(() => {
         if (isAuthenticated) {
             navigate('/dashboard');
@@ -43,7 +42,6 @@ const LoginPage = () => {
             ...prev,
             [name]: value
         }));
-        // Clear validation error when user starts typing
         if (validationErrors[name]) {
             setValidationErrors(prev => ({
                 ...prev,
@@ -55,7 +53,6 @@ const LoginPage = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         
-        // Validate form
         if (!validateForm()) {
             return;
         }
@@ -63,35 +60,34 @@ const LoginPage = () => {
         try {
             dispatch(loginStart());
 
-            // Create URLSearchParams for x-www-form-urlencoded format
             const params = new URLSearchParams();
             params.append('username', formData.username);
             params.append('password', formData.password);
-            params.append('grant_type', 'password');
+            params.append('grant_type', '');
+            params.append('scope', '');
+            params.append('client_id', '');
+            params.append('client_secret', '');
 
             console.log('Attempting login with:', formData.username);
 
-            const response = await axios.post('/token', params, {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                withCredentials: true
-            });
+            const response = await api.post('/token', params);
 
-            console.log('Login response received');
+            console.log('Login response received:', response);
 
-            if (response.data?.access_token) {
+            if (response?.access_token) {
                 const userData = {
-                    token: response.data.access_token,
-                    refreshToken: response.data.refresh_token,
-                    userId: response.data.user_id,
-                    isActive: true,
-                    username: formData.username
+                    token: response.access_token,
+                    refreshToken: response.refresh_token,
+                    userId: response.user_id,
+                    isActive: response.is_active,
+                    username: formData.username,
+                    created: response.created_at,
+                    expires: response.expires_at
                 };
 
-                // Store tokens in localStorage
-                localStorage.setItem('token', response.data.access_token);
-                localStorage.setItem('refreshToken', response.data.refresh_token);
+                // Store auth data
+                localStorage.setItem('token', response.access_token);
+                localStorage.setItem('refreshToken', response.refresh_token);
                 localStorage.setItem('userData', JSON.stringify(userData));
 
                 dispatch(loginSuccess(userData));
@@ -102,6 +98,7 @@ const LoginPage = () => {
         } catch (err) {
             console.error('Login error:', err);
             const errorMessage = err.response?.data?.detail || 
+                               err.message ||
                                'Unable to connect to server. Please try again later.';
             dispatch(loginFailure(errorMessage));
         }

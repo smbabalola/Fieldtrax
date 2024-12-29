@@ -1,0 +1,269 @@
+// File: /src/styles/components/WellboreVisualization.scss
+.wellbore-visualization {
+  position: relative;
+  background: #f8f9fa;
+  border-radius: 4px;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  min-height: 600px;
+
+  &.fullscreen {
+    width: 100vw !important;
+    height: 100vh !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 9999;
+    background: white;
+    padding: 20px;
+    margin: 0;
+
+    .visualization-controls {
+      top: 20px;
+      right: 20px;
+    }
+
+    svg {
+      height: calc(100vh - 40px) !important;
+    }
+  }
+
+  .wellbore-tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 1000;
+    max-width: 200px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: -5px;
+      left: 50%;
+      transform: translateX(-50%);
+      border-width: 5px 5px 0;
+      border-style: solid;
+      border-color: rgba(0, 0, 0, 0.8) transparent transparent;
+    }
+
+    .tooltip-header {
+      font-weight: bold;
+      margin-bottom: 4px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .tooltip-content {
+      font-size: 11px;
+
+      .tooltip-row {
+        display: flex;
+        justify-content: space-between;
+        margin: 2px 0;
+
+        .label {
+          color: #adb5bd;
+          margin-right: 8px;
+        }
+
+        .value {
+          font-family: monospace;
+        }
+      }
+    }
+  }
+
+  .visualization-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+
+    .grid-line {
+      stroke: #dee2e6;
+      stroke-width: 0.5;
+      stroke-dasharray: 2,2;
+    }
+
+    .grid-label {
+      fill: #6c757d;
+      font-size: 10px;
+      font-family: monospace;
+    }
+  }
+
+  .wellbore-elements {
+    .casing-group {
+      .casing {
+        fill: none;
+        stroke: #0056b3;
+        stroke-width: 2;
+        transition: all 0.2s ease;
+
+        &.selected {
+          stroke: #004085;
+          stroke-width: 3;
+        }
+
+        &.cement {
+          fill: #e9ecef;
+          fill-opacity: 0.5;
+          stroke: none;
+        }
+
+        .casing-label {
+          fill: #495057;
+          font-size: 11px;
+          font-weight: 500;
+
+          &.depth {
+            font-family: monospace;
+          }
+        }
+      }
+    }
+
+    .liner-group {
+      .liner {
+        fill: none;
+        stroke: #28a745;
+        stroke-width: 2;
+        stroke-dasharray: 5,5;
+        transition: all 0.2s ease;
+
+        &.selected {
+          stroke: #1e7e34;
+          stroke-width: 3;
+        }
+
+        .liner-label {
+          fill: #495057;
+          font-size: 11px;
+          font-weight: 500;
+
+          &.depth {
+            font-family: monospace;
+          }
+        }
+      }
+    }
+
+    .measurement-points {
+      .point {
+        fill: #6c757d;
+        stroke: white;
+        stroke-width: 1;
+        cursor: pointer;
+        transition: all 0.2s ease;
+
+        &:hover {
+          fill: #495057;
+          transform: scale(1.25);
+        }
+
+        &.selected {
+          fill: #0056b3;
+         
+        }
+      }
+    }
+  }
+
+  .visualization-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+    background: white;
+    padding: 5px;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    display: flex;
+    gap: 5px;
+
+    .btn-group {
+      .btn {
+        padding: 6px;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: white;
+        border: 1px solid #dee2e6;
+        color: #495057;
+
+        &:hover {
+          background: #f8f9fa;
+          color: #0056b3;
+        }
+
+        &:active {
+          background: #e9ecef;
+        }
+
+        &.active {
+          background: #e9ecef;
+          color: #0056b3;
+        }
+
+        svg {
+          width: 14px;
+          height: 14px;
+        }
+      }
+    }
+  }
+
+  .scale-indicator {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    background: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: monospace;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    pointer-events: none;
+  }
+
+  .loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+
+    .spinner-border {
+      color: #0056b3;
+    }
+  }
+}
+
+// Print styles
+@media print {
+  .wellbore-visualization {
+    .visualization-controls,
+    .wellbore-tooltip {
+      display: none !important;
+    }
+
+    svg {
+      max-width: 100% !important;
+      height: auto !important;
+    }
+  }
+}

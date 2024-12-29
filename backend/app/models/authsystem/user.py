@@ -21,6 +21,7 @@ class User(BaseDBModel):
     roles = relationship('Role', secondary=user_roles_table, back_populates='users')
     # user = relationship("User", back_populates="settings")
     settings = relationship("UserSetting", back_populates="user")
+    activities = relationship("Activity", back_populates="user")
 
     def __repr__(self):
         return f"<User: {self.username}>"

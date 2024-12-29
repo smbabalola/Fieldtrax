@@ -1,0 +1,1499 @@
+// File: /src/services/authService.js
+import api, { API_ENDPOINTS, handleApiError } from './api';
+
+const authService = {
+  login: async (credentials) => {
+    try {
+      const response = await api.post(API_ENDPOINTS.auth.login, credentials);
+      
+      // Add response validation and transformation
+      if (!response || typeof response !== 'object') {
+        throw new Error('Invalid response format');
+      }
+
+      // Check if we have the required data
+      if (!response.token && !response.access_token) {
+        throw new Error('No token received from server');
+      }
+
+      // Normalize the response format
+      const normalizedResponse = {
+        token: response.token || response.access_token,
+        refreshToken: response.refreshToken || response.refresh_token,
+        user: response.user || {
+          id: response.id,
+          email: response.email,
+          name: response.name,
+          role: response.role
+        }
+      };
+
+      // Store auth data
+      localStorage.setItem('user', JSON.stringify(normalizedResponse.user));
+      localStorage.setItem('token', normalizedResponse.token);
+      if (normalizedResponse.refreshToken) {
+        localStorage.setItem('refreshToken', normalizedResponse.refreshToken);
+      }
+
+      return normalizedResponse;
+    } catch (error) {
+      console.error('Login error details:', error);
+      if (error.message === 'Invalid response format') {
+        throw error;
+      }
+      throw handleApiError(error, 'Login failed');
+    }
+  },
+
+  logout: async () => {
+    try {
+      // Attempt to call logout endpoint if available
+      const token = localStorage.getItem('token');
+      if (token) {
+        await api.post(API_ENDPOINTS.auth.logout).catch((error) => {
+          // Just log the error but continue with logout
+          console.log('Logout endpoint error:', error);
+        });
+      }
+    } finally {
+      // Always clear local storage
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      window.location.href = '/login';
+    }
+  },
+
+  getCurrentUser: () => {
+    try {
+      const userStr = localStorage.getItem('user');
+      if (!userStr) return null;
+      
+      const user = JSON.parse(userStr);
+      return user && typeof user === 'object' ? user : null;
+    } catch (error) {
+      console.error('Error parsing user data:', error);
+      localStorage.removeItem('user');
+      return null;
+    }
+  },
+
+  isAuthenticated: () => {
+    const user = authService.getCurrentUser();
+    const token = localStorage.getItem('token');
+    return !!(user && token);
+  },
+
+  checkTokenExpiration: () => {
+    const user = authService.getCurrentUser();
+    if (!user || !user.exp) return false;
+    
+    const expirationTime = user.exp * 1000; // Convert to milliseconds
+    const currentTime = Date.now();
+    const fiveMinutes = 5 * 60 * 1000;
+    
+    return currentTime + fiveMinutes >= expirationTime;
+  }
+};
+
+export default authService;
+
+// File: /frontend/src/services/cacheService.js
+class CacheService {
+    constructor() {
+      this.cache = new Map();
+      this.timeouts = new Map();
+    }
+  
+    // Set cache with expiration
+    set(key, data, expirationMinutes = 5) {
+      this.cache.set(key, {
+        data,
+        timestamp: Date.now()
+      });
+  
+      // Clear any existing timeout
+      if (this.timeouts.has(key)) {
+        clearTimeout(this.timeouts.get(key));
+      }
+  
+      // Set new timeout
+      const timeout = setTimeout(() => {
+        this.delete(key);
+      }, expirationMinutes * 60 * 1000);
+  
+      this.timeouts.set(key, timeout);
+    }
+  
+    // Get cached data if not expired
+    get(key, expirationMinutes = 5) {
+      const cached = this.cache.get(key);
+      if (!cached) return null;
+  
+      const now = Date.now();
+      const age = (now - cached.timestamp) / 1000 / 60; // age in minutes
+  
+      if (age > expirationMinutes) {
+        this.delete(key);
+        return null;
+      }
+  
+      return cached.data;
+    }
+  
+    // Delete cache entry
+    delete(key) {
+      this.cache.delete(key);
+      if (this.timeouts.has(key)) {
+        clearTimeout(this.timeouts.get(key));
+        this.timeouts.delete(key);
+      }
+    }
+  
+    // Clear all cache
+    clear() {
+      this.cache.clear();
+      this.timeouts.forEach(timeout => clearTimeout(timeout));
+      this.timeouts.clear();
+    }
+  
+    // Check if cache exists and is valid
+    isValid(key, expirationMinutes = 5) {
+      const cached = this.cache.get(key);
+      if (!cached) return false;
+  
+      const now = Date.now();
+      const age = (now - cached.timestamp) / 1000 / 60;
+      return age <= expirationMinutes;
+    }
+  }
+  
+  export const cacheService = new CacheService();
+  
+  // Cache-wrapped API request helper
+  export const cachedApiRequest = async (key, apiCall, expirationMinutes = 5) => {
+    const cached = cacheService.get(key, expirationMinutes);
+    if (cached) {
+      return cached;
+    }
+  
+    const data = await apiCall();
+    cacheService.set(key, data, expirationMinutes);
+    return data;
+  };
+
+
+// File: /src/services/fluidService.js
+import api, { API_ENDPOINTS, handleApiError } from './api';
+
+const fluidService = {
+  getFluids: async (wellboreId) => {
+    try {
+      const response = await api.get(
+        API_ENDPOINTS.fluids.getByWellbore(wellboreId)
+      );
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Error fetching fluids');
+    }
+  },
+
+  getFluidTypes: async (wellboreId, fluidType) => {
+    try {
+      const response = await api.get(
+        API_ENDPOINTS.fluids.getByType(wellboreId, fluidType)
+      );
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Error fetching fluid types');
+    }
+  },
+
+  createFluid: async (fluidData) => {
+    try {
+      const response = await api.post(
+        API_ENDPOINTS.fluids.base,
+        fluidData
+      );
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Error creating fluid');
+    }
+  },
+
+  updateFluid: async (fluidId, fluidData) => {
+    try {
+      const response = await api.put(
+        API_ENDPOINTS.fluids.update(fluidId),
+        fluidData
+      );
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Error updating fluid');
+    }
+  }
+};
+
+export default fluidService;
+
+
+// src/services/jobCenterService.js
+import apiRequest, { API_ENDPOINTS, handleApiError } from '../services/api';
+
+const BASE_URL = '/job-centers';
+
+const jobCenterService = {
+  getJobCenters: async (params = {}) => {
+    try {
+      const response = await apiRequest.get(BASE_URL, {
+        params: {
+          skip: params.skip || 0,
+          limit: params.limit || 100,
+          ...params
+        },
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
+      return Array.isArray(response) ? response : [];
+    } catch (error) {
+      handleApiError(error, 'Error fetching job centers');
+      return [];
+    }
+  },
+
+  getActiveJobCenters: async () => {
+    try {
+      const response = await apiRequest.get(`${BASE_URL}/active`, {
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      return Array.isArray(response) ? response : [];
+    } catch (error) {
+      handleApiError(error, 'Error fetching active job centers');
+      return [];
+    }
+  },
+
+  getJobCenterByWell: async (wellName) => {
+    try {
+      const response = await apiRequest.get(`${BASE_URL}/well/${wellName}`, {
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      return response;
+    } catch (error) {
+      handleApiError(error, 'Error fetching job center by well');
+      return null;
+    }
+  },
+
+  searchJobCenters: async (searchTerm = '') => {
+    try {
+      const response = await apiRequest.get(BASE_URL, {
+        params: {
+          search: searchTerm,
+          limit: 100
+        },
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      return Array.isArray(response) ? response : [];
+    } catch (error) {
+      handleApiError(error, 'Error searching job centers');
+      return [];
+    }
+  },
+
+  getJobCenterById: async (id) => {
+    try {
+      const response = await apiRequest.get(`${BASE_URL}/${id}`, {
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      return response;
+    } catch (error) {
+      handleApiError(error, 'Error fetching job center by ID');
+      return null;
+    }
+  }
+};
+
+export default jobCenterService;
+
+// src/services/jobService.js
+import api from '../services/api';
+
+const JOB_API_URL = '/jobs';
+
+// Format dates for API
+const formatDateForAPI = (date) => {
+  if (!date) return null;
+  return new Date(date).toISOString();
+};
+
+// Transform job data for API
+const transformJobDataForAPI = (data) => {
+  return {
+    jobcenter_id: data.jobcenter_id || null,
+    job_name: data.job_name,
+    job_description: data.job_description || null,
+    rig_id: data.rig_id || null,
+    purchase_order_id: data.purchase_order_id || null,
+    operator_id: data.operator_id || null,
+    well_id: data.well_id || null,
+    service_code: data.service_code || null,
+    country: data.country || null,
+    measured_depth: data.measured_depth ? Number(data.measured_depth) : null,
+    total_vertical_depth: data.total_vertical_depth ? Number(data.total_vertical_depth) : null,
+    spud_date: formatDateForAPI(data.spud_date),
+    status: data.status || 'Planned',
+    mobilization_date: formatDateForAPI(data.mobilization_date),
+    demobilization_date: formatDateForAPI(data.demobilization_date),
+    job_closed: Boolean(data.job_closed),
+    trainingfile: Boolean(data.trainingfile)
+  };
+};
+
+const jobService = {
+  // Create job with proper validation and transformation
+  createJob: async (jobData) => {
+    const transformedData = transformJobDataForAPI(jobData);
+    return await api.post(JOB_API_URL, transformedData);
+  },
+
+  getJobs: async (params = {}) => {
+    const { page = 1, pageSize = 10, ...otherParams } = params;
+    
+    const queryParams = {
+      skip: (page - 1) * pageSize,
+      limit: pageSize,
+      ...otherParams
+    };
+
+    const response = await api.get(JOB_API_URL, { params: queryParams });
+    
+    const items = Array.isArray(response) ? response : 
+                  Array.isArray(response.items) ? response.items : [];
+    
+    return {
+      items,
+      page,
+      page_size: pageSize,
+      total: response.total || items.length,
+      total_pages: response.total_pages || Math.ceil(items.length / pageSize)
+    };
+  },
+
+  getJob: async (jobId) => {
+    return await api.get(`${JOB_API_URL}/${jobId}`);
+  },
+
+  updateJob: async (jobId, jobData) => {
+    const transformedData = transformJobDataForAPI(jobData);
+    return await api.put(`${JOB_API_URL}/${jobId}`, transformedData);
+  },
+
+  updateJobStatus: async (jobId, status) => {
+    return await api.patch(`${JOB_API_URL}/${jobId}/status`, { status });
+  },
+
+  deleteJob: async (jobId) => {
+    return await api.delete(`${JOB_API_URL}/${jobId}`);
+  },
+
+  exportJobs: async (jobIds) => {
+    return await api.post(`${JOB_API_URL}/export`, { job_ids: jobIds }, {
+      responseType: 'blob'
+    });
+  }
+};
+
+export default jobService;
+
+// src/services/operatorService.js
+import api, { API_ENDPOINTS, handleApiError } from './api';
+
+const operatorService = {
+  getOperators: async (params = {}) => {
+    try {
+      console.log('Fetching operators with params:', params);
+      const queryParams = {
+        skip: params.page ? params.page * (params.limit || 10) : 0,
+        limit: params.limit || 10,
+        sort_field: params.sort_field || 'operator_name',
+        sort_direction: params.sort_direction || 'asc'
+      };
+
+      const response = await api.get(API_ENDPOINTS.operators.getAll, { 
+        params: queryParams 
+      });
+
+      // API returns data directly due to response interceptor
+      console.log('Operators API response:', response);
+
+      // Handle both paginated and non-paginated responses
+      if (response?.items) {
+        // Paginated response
+        return {
+          items: response.items,
+          total: response.total,
+          page: params.page || 0,
+          pageSize: params.limit || 10
+        };
+      } else if (Array.isArray(response)) {
+        // Non-paginated response
+        return {
+          items: response,
+          total: response.length,
+          page: params.page || 0,
+          pageSize: params.limit || 10
+        };
+      }
+
+      throw new Error('Invalid response format from server');
+    } catch (error) {
+      return handleApiError(error, 'Failed to fetch operators');
+    }
+  },
+
+  getOperatorByName: async (name) => {
+    try {
+      const response = await api.get(API_ENDPOINTS.operators.getByName(name));
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Failed to fetch operator by name');
+    }
+  },
+
+  getOperatorByCode: async (code) => {
+    try {
+      const response = await api.get(API_ENDPOINTS.operators.getByCode(code));
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Failed to fetch operator by code');
+    }
+  },
+
+  createOperator: async (operatorData) => {
+    try {
+      const response = await api.post(API_ENDPOINTS.operators.create, operatorData);
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Failed to create operator');
+    }
+  },
+
+  updateOperator: async (id, operatorData) => {
+    try {
+      const response = await api.put(`${API_ENDPOINTS.operators.base}/${id}`, operatorData);
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Failed to update operator');
+    }
+  },
+
+  deleteOperator: async (id) => {
+    try {
+      const response = await api.delete(`${API_ENDPOINTS.operators.base}/${id}`);
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Failed to delete operator');
+    }
+  }
+};
+
+export default operatorService;
+
+// File: /src/services/purchaseOrderService.js
+import api, { API_ENDPOINTS, handleApiError } from './api';
+
+const formatDate = (date) => {
+  if (!date) return new Date().toISOString();
+  try {
+    return new Date(date).toISOString();
+  } catch (e) {
+    console.error('Date formatting error:', e);
+    return new Date().toISOString();
+  }
+};
+
+const purchaseOrderService = {
+  getPurchaseOrders: async (params = {}) => {
+    try {
+      const response = await api.get(API_ENDPOINTS.purchaseOrders.getAll, { params });
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Error fetching purchase orders');
+    }
+  },
+
+  getPurchaseOrderById: async (id) => {
+    try {
+      const response = await api.get(API_ENDPOINTS.purchaseOrders.getById(id));
+      return response;
+    } catch (error) {
+      return handleApiError(error, 'Error fetching purchase order details');
+    }
+  },
+
+  createPurchaseOrder: async (poData) => {
+    try {
+      // Ensure all required fields are present and properly formatted
+      const formattedData = {
+        created_at: formatDate(new Date()),
+        updated_at: formatDate(new Date()),
+        well_id: poData.well_id || null,
+        po_number: poData.po_number || '',
+        contract_no: poData.contract_no || '',
+        vendor_no: poData.vendor_no || '',
+        DRSS_no: poData.DRSS_no || '',
+        po_date: formatDate(poData.po_date),
+        supplier_name: poData.supplier_name || '',
+        supplier_address1: poData.supplier_address1 || '',
+        supplier_address2: poData.supplier_address2 || '',
+        county: poData.county || '',
+        country: poData.country || '',
+        supplier_contact: poData.supplier_contact || '',
+        supplier_contact_information: poData.supplier_contact_information || '',
+        buyer_name: poData.buyer_name || '',
+        buyer_address1: poData.buyer_address1 || '',
+        buyer_address_2: poData.buyer_address_2 || '',
+        buyer_contact_information: poData.buyer_contact_information || '',
+        delievry_address1: poData.delievry_address1 || '',
+        delivery_address2: poData.delivery_address2 || '',
+        delievry_postcode: poData.delievry_postcode || '',
+        delivery_zipcode: poData.delivery_zipcode || '',
+        payment_terms: poData.payment_terms || '',
+        shipping_terms: poData.shipping_terms || ''
+      };
+
+      // Log the formatted data for debugging
+      console.log('Sending PO data to API:', formattedData);
+      
+      const response = await api.post(API_ENDPOINTS.purchaseOrders.base, formattedData);
+      console.log('API Response:', response);
+      
+      return response;
+    } catch (error) {
+      console.error('PO creation error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      throw error;
+    }
+  }
+};
+
+export default purchaseOrderService;
+
+// src/services/rigService.js
+import apiRequest, { API_ENDPOINTS, handleApiError } from '../services/api';
+
+const BASE_URL = API_ENDPOINTS.rigs.base;
+
+const rigService = {
+  getAllRigs: async () => {
+    try {
+      const response = await apiRequest.get(API_ENDPOINTS.rigs.getAll, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
+      return response.data; // Only return the data
+    } catch (error) {
+      handleApiError(error, 'Error fetching rigs');
+    }
+  },
+
+  getActiveRigs: async () => {
+    try {
+      const response = await apiRequest.get(API_ENDPOINTS.rigs.getActive);
+      return response.data; // Only return the data
+    } catch (error) {
+      handleApiError(error, 'Error fetching active rigs');
+    }
+  }
+};
+
+export default rigService;
+
+// src/services/settingsService.js
+import api from '../services/api';
+
+const SETTINGS_BASE_URL = '/settings';
+
+const defaultSettings = {
+  display: {
+    sidebarOpen: true,
+    density: 'comfortable',
+    fontSize: 'medium',
+    showGridLines: true
+  },
+  theme: {
+    mode: 'light',
+    primary: '#007bff',
+    secondary: '#6c757d'
+  },
+  activeJobId: null,
+  dateFormat: 'MM/DD/YYYY',
+  timeFormat: '12h',
+  language: 'en',
+  notifications: {
+    email: true,
+    push: true,
+    sms: false
+  },
+  table: {
+    rowsPerPage: 10,
+    sortDirection: 'asc'
+  }
+};
+
+const getStoredSettings = () => {
+  try {
+    const stored = localStorage.getItem('settings');
+    if (!stored) return null;
+    const parsed = JSON.parse(stored);
+    return typeof parsed === 'object' ? parsed : null;
+  } catch (error) {
+    console.warn('Failed to parse stored settings:', error);
+    return null;
+  }
+};
+
+const storeSettings = (settings) => {
+  try {
+    localStorage.setItem('settings', JSON.stringify(settings));
+    return true;
+  } catch (error) {
+    console.warn('Failed to store settings:', error);
+    return false;
+  }
+};
+
+const settingsService = {
+  defaults: defaultSettings,
+
+  getSettings: async () => {
+    try {
+      const storedSettings = getStoredSettings();
+      const serverSettings = await api.get(SETTINGS_BASE_URL);
+      
+      const mergedSettings = {
+        ...defaultSettings,
+        ...(storedSettings || {}),
+        ...serverSettings
+      };
+
+      storeSettings(mergedSettings);
+      
+      return mergedSettings;
+    } catch (error) {
+      console.warn('Settings API error:', error);
+      
+      const storedSettings = getStoredSettings();
+      if (storedSettings) {
+        console.log('Using stored settings due to API error');
+        return {
+          ...defaultSettings,
+          ...storedSettings,
+          _source: 'cache'
+        };
+      }
+
+      return {
+        ...defaultSettings,
+        _source: 'defaults'
+      };
+    }
+  },
+
+  updateSettings: async (settingsData) => {
+    if (!settingsData || typeof settingsData !== 'object') {
+      throw new Error('Invalid settings data');
+    }
+
+    const updatedSettings = await api.put(SETTINGS_BASE_URL, settingsData);
+    
+    const mergedSettings = {
+      ...defaultSettings,
+      ...updatedSettings
+    };
+    
+    storeSettings(mergedSettings);
+    return mergedSettings;
+  },
+
+  resetSettings: async () => {
+    try {
+      await api.post(`${SETTINGS_BASE_URL}/reset`);
+      localStorage.removeItem('settings');
+      return defaultSettings;
+    } catch (error) {
+      console.warn('Failed to reset settings on server:', error);
+      localStorage.removeItem('settings');
+      return {
+        ...defaultSettings,
+        _source: 'defaults'
+      };
+    }
+  },
+
+  getInitialSettings: () => {
+    const storedSettings = getStoredSettings();
+    return {
+      ...defaultSettings,
+      ...(storedSettings || {}),
+      _source: storedSettings ? 'cache' : 'defaults'
+    };
+  }
+};
+
+export default settingsService;
+
+// File: /frontend/src/services/timeSheetService.js
+import axios from 'axios';
+import { handleApiError } from '../utils/errorHandler';
+
+const API_URL = 'http://localhost:8000/api/v1';
+
+const timeSheetService = {
+  getTimeSheets: async (jobId) => {
+    try {
+      const response = await axios.get(`${API_URL}/time-sheets/job/${jobId}`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error);
+    }
+  },
+
+  getPendingTimeSheets: async () => {
+    try {
+      const response = await axios.get(`${API_URL}/time-sheets/pending`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error);
+    }
+  },
+
+  createTimeSheet: async (timeSheetData) => {
+    try {
+      const response = await axios.post(`${API_URL}/time-sheets/`, timeSheetData);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error);
+    }
+  },
+
+  approveTimeSheet: async (timeSheetId) => {
+    try {
+      const response = await axios.post(`${API_URL}/time-sheets/${timeSheetId}/approve`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error);
+    }
+  },
+
+  updateTimeSheet: async (timeSheetId, timeSheetData) => {
+    try {
+      const response = await axios.put(`${API_URL}/time-sheets/${timeSheetId}`, timeSheetData);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error);
+    }
+  },
+};
+
+export default timeSheetService;
+
+// File: src/services/trajectoryDataService.js
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
+
+const trajectoryDataService = {
+  importFromCSV: async (file) => {
+    return new Promise((resolve, reject) => {
+      Papa.parse(file, {
+        header: true,
+        dynamicTyping: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          if (results.errors.length > 0) {
+            reject(new Error('Error parsing CSV: ' + results.errors[0].message));
+            return;
+          }
+          resolve(results.data);
+        },
+        error: (error) => {
+          reject(new Error('Error parsing CSV: ' + error.message));
+        }
+      });
+    });
+  },
+
+  importFromExcel: async (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = e.target.result;
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          
+          // Convert to proper format
+          const headers = jsonData[0];
+          const rows = jsonData.slice(1).map(row => {
+            const obj = {};
+            headers.forEach((header, index) => {
+              obj[header] = row[index];
+            });
+            return obj;
+          });
+          
+          resolve(rows);
+        } catch (error) {
+          reject(new Error('Error parsing Excel file: ' + error.message));
+        }
+      };
+      reader.onerror = (error) => {
+        reject(new Error('Error reading file: ' + error.message));
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  },
+
+  exportToCSV: (data) => {
+    const csv = Papa.unparse(data);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    return blob;
+  },
+
+  exportToExcel: (data) => {
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Trajectory Data");
+    const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    return blob;
+  },
+
+  validateImportedData: (data) => {
+    const errors = [];
+    const requiredFields = ['measured_depth', 'inclination', 'azimuth'];
+
+    // Check for required fields
+    data.forEach((row, index) => {
+      requiredFields.forEach(field => {
+        if (row[field] === undefined || row[field] === null || row[field] === '') {
+          errors.push(`Row ${index + 1}: Missing required field '${field}'`);
+        }
+      });
+
+      // Validate numeric values
+      if (row.measured_depth !== undefined && isNaN(parseFloat(row.measured_depth))) {
+        errors.push(`Row ${index + 1}: Measured depth must be a number`);
+      }
+      if (row.inclination !== undefined && (isNaN(parseFloat(row.inclination)) || row.inclination < 0 || row.inclination > 180)) {
+        errors.push(`Row ${index + 1}: Inclination must be a number between 0 and 180`);
+      }
+      if (row.azimuth !== undefined && (isNaN(parseFloat(row.azimuth)) || row.azimuth < 0 || row.azimuth > 360)) {
+        errors.push(`Row ${index + 1}: Azimuth must be a number between 0 and 360`);
+      }
+    });
+
+    return errors;
+  },
+
+  downloadFile: (blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  }
+};
+
+export default trajectoryDataService;
+
+// src/services/trajectoryService.js
+import axios from '../services/api';
+
+const TRAJECTORY_API_URL = '/api/v1/trajectory';
+
+const handleError = (error, customMessage) => {
+  console.error('API Error:', error);
+  
+  if (axios.isCancel(error)) {
+    throw new Error('Request was cancelled');
+  }
+
+  if (error.response?.data?.detail) {
+    throw new Error(error.response.data.detail);
+  }
+
+  throw new Error(customMessage || 'An unexpected error occurred');
+};
+
+const trajectoryService = {
+  getTrajectoryData: async (wellId) => {
+    try {
+      const response = await axios.get(`${TRAJECTORY_API_URL}/${wellId}`);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'Failed to fetch trajectory data');
+    }
+  },
+
+  addTrajectoryPoint: async (wellId, pointData) => {
+    try {
+      const response = await axios.post(
+        `${TRAJECTORY_API_URL}/${wellId}/points`,
+        pointData
+      );
+      return response.data;
+    } catch (error) {
+      handleError(error, 'Failed to add trajectory point');
+    }
+  },
+
+  updateTrajectoryPoint: async (pointId, pointData) => {
+    try {
+      const response = await axios.put(
+        `${TRAJECTORY_API_URL}/points/${pointId}`,
+        pointData
+      );
+      return response.data;
+    } catch (error) {
+      handleError(error, 'Failed to update trajectory point');
+    }
+  },
+
+  deleteTrajectoryPoint: async (pointId) => {
+    try {
+      await axios.delete(`${TRAJECTORY_API_URL}/points/${pointId}`);
+      return true;
+    } catch (error) {
+      handleError(error, 'Failed to delete trajectory point');
+    }
+  },
+
+  calculateTrajectory: async (wellId) => {
+    try {
+      const response = await axios.post(`${TRAJECTORY_API_URL}/${wellId}/calculate`);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'Failed to calculate trajectory');
+    }
+  }
+};
+
+export default trajectoryService;
+
+// src/services/wellboreGeometryService.js
+import axios from '../services/api';
+
+const WELLBORE_API_URL = '/wellbore-geometry';
+
+const transformTubularData = (data) => ({
+  outer_diameter: data.outer_diameter ? Number(data.outer_diameter) : null,
+  inner_diameter: data.inner_diameter ? Number(data.inner_diameter) : null,
+  weight: data.weight ? Number(data.weight) : null,
+  grade: data.grade || null,
+  thread: data.thread || null,
+  open_hole_size: data.open_hole_size ? Number(data.open_hole_size) : null,
+  yield_strength: data.yield_strength ? Number(data.yield_strength) : null,
+  capacity: data.capacity ? Number(data.capacity) : null,
+  volume: data.volume ? Number(data.volume) : null,
+  burst: data.burst ? Number(data.burst) : null,
+  collapse: data.collapse ? Number(data.collapse) : null,
+  drift: data.drift ? Number(data.drift) : null,
+  start_depth: data.start_depth ? Number(data.start_depth) : null,
+  end_depth: data.end_depth ? Number(data.end_depth) : null,
+  remarks: data.remarks || null
+});
+
+const transformCasingData = (data) => ({
+  ...transformTubularData(data),
+  cement_top: data.cement_top ? Number(data.cement_top) : null,
+  cement_yield: data.cement_yield ? Number(data.cement_yield) : null
+});
+
+const transformLinerData = (data) => ({
+  ...transformTubularData(data),
+  liner_top: data.liner_top ? Number(data.liner_top) : null,
+  liner_bottom: data.liner_bottom ? Number(data.liner_bottom) : null,
+  bht_at_liner_top: data.bht_at_liner_top ? Number(data.bht_at_liner_top) : null,
+  liner_top_depth: data.liner_top_depth ? Number(data.liner_top_depth) : null,
+  liner_top_deviation: data.liner_top_deviation ? Number(data.liner_top_deviation) : null,
+  liner_shoe_deviation: data.liner_shoe_deviation ? Number(data.liner_shoe_deviation) : null,
+  liner_Overlap_length: data.liner_Overlap_length ? Number(data.liner_Overlap_length) : null
+});
+
+const handleError = (error, customMessage) => {
+  console.error('API Error:', error);
+  
+  if (axios.isCancel(error)) {
+    throw new Error('Request was cancelled');
+  }
+
+  if (error.response?.data?.detail) {
+    throw new Error(error.response.data.detail);
+  }
+
+  throw new Error(customMessage || 'An unexpected error occurred');
+};
+
+const wellboreGeometryService = {
+  // Casing Operations
+  getCasings: async (wellboreId) => {
+    try {
+      const response = await axios.get(`${WELLBORE_API_URL}/${wellboreId}/casings`);
+      return response.data.map(transformCasingData);
+    } catch (error) {
+      handleError(error, 'Failed to fetch casings');
+    }
+  },
+
+  addCasing: async (wellboreId, casingData) => {
+    try {
+      const transformedData = transformCasingData(casingData);
+      const response = await axios.post(
+        `${WELLBORE_API_URL}/${wellboreId}/casings`, 
+        transformedData
+      );
+      return transformCasingData(response.data);
+    } catch (error) {
+      handleError(error, 'Failed to add casing');
+    }
+  },
+
+  updateCasing: async (casingId, casingData) => {
+    try {
+      const transformedData = transformCasingData(casingData);
+      const response = await axios.put(
+        `${WELLBORE_API_URL}/casings/${casingId}`, 
+        transformedData
+      );
+      return transformCasingData(response.data);
+    } catch (error) {
+      handleError(error, 'Failed to update casing');
+    }
+  },
+
+  deleteCasing: async (casingId) => {
+    try {
+      await axios.delete(`${WELLBORE_API_URL}/casings/${casingId}`);
+      return true;
+    } catch (error) {
+      handleError(error, 'Failed to delete casing');
+    }
+  },
+
+  // Liner Operations
+  getLiners: async (wellboreId) => {
+    try {
+      const response = await axios.get(`${WELLBORE_API_URL}/${wellboreId}/liners`);
+      return response.data.map(transformLinerData);
+    } catch (error) {
+      handleError(error, 'Failed to fetch liners');
+    }
+  },
+
+  addLiner: async (wellboreId, linerData) => {
+    try {
+      const transformedData = transformLinerData(linerData);
+      const response = await axios.post(
+        `${WELLBORE_API_URL}/${wellboreId}/liners`, 
+        transformedData
+      );
+      return transformLinerData(response.data);
+    } catch (error) {
+      handleError(error, 'Failed to add liner');
+    }
+  },
+
+  updateLiner: async (linerId, linerData) => {
+    try {
+      const transformedData = transformLinerData(linerData);
+      const response = await axios.put(
+        `${WELLBORE_API_URL}/liners/${linerId}`, 
+        transformedData
+      );
+      return transformLinerData(response.data);
+    } catch (error) {
+      handleError(error, 'Failed to update liner');
+    }
+  },
+
+  deleteLiner: async (linerId) => {
+    try {
+      await axios.delete(`${WELLBORE_API_URL}/liners/${linerId}`);
+      return true;
+    } catch (error) {
+      handleError(error, 'Failed to delete liner');
+    }
+  },
+
+  // Combined Wellbore Geometry Operations
+  getWellboreGeometry: async (wellboreId) => {
+    try {
+      const [casings, liners] = await Promise.all([
+        wellboreGeometryService.getCasings(wellboreId),
+        wellboreGeometryService.getLiners(wellboreId)
+      ]);
+      
+      return {
+        casings,
+        liners
+      };
+    } catch (error) {
+      handleError(error, 'Failed to fetch wellbore geometry');
+    }
+  }
+};
+
+export default wellboreGeometryService;
+
+// File: /src/services/wellService.js
+import apiRequest, { API_ENDPOINTS, handleApiError } from './api';
+
+const wellService = {
+  /**
+   * Get all wells
+   * @returns {Promise<Array>} Array of wells
+   */
+  getAllWells: async () => {
+    try {
+      const response = await apiRequest.get(API_ENDPOINTS.wells.getAll);
+      return response;
+    } catch (error) {
+      handleApiError(error, 'Error fetching wells');
+      return [];
+    }
+  },
+
+  /**
+   * Get wells by operator ID
+   * @param {string|number} operatorId - The operator's ID
+   * @returns {Promise<Array>} Array of wells belonging to the operator
+   */
+  getWellsByOperator: async (operatorId) => {
+    try {
+      if (!operatorId) {
+        throw new Error('Operator ID is required');
+      }
+      const response = await apiRequest.get(API_ENDPOINTS.wells.getByOperator(operatorId));
+      return Array.isArray(response) ? response : [];
+    } catch (error) {
+      handleApiError(error, 'Error fetching wells for operator');
+      return [];
+    }
+  },
+
+  /**
+   * Get a single well by ID
+   * @param {string|number} wellId - The well's ID
+   * @returns {Promise<Object>} Well data
+   */
+  getWellById: async (wellId) => {
+    try {
+      if (!wellId) {
+        throw new Error('Well ID is required');
+      }
+      const response = await apiRequest.get(`${API_ENDPOINTS.wells.base}/${wellId}`);
+      return response;
+    } catch (error) {
+      handleApiError(error, 'Error fetching well details');
+      throw error;
+    }
+  },
+
+  /**
+   * Create a new well
+   * @param {Object} wellData - The well data to create
+   * @returns {Promise<Object>} Created well data
+   */
+  createWell: async (wellData) => {
+    try {
+      if (!wellData.well_name) {
+        throw new Error('Well name is required');
+      }
+      if (!wellData.operator_id) {
+        throw new Error('Operator ID is required');
+      }
+
+      const response = await apiRequest.post(API_ENDPOINTS.wells.create, wellData);
+      return response;
+    } catch (error) {
+      handleApiError(error, 'Error creating well');
+      throw error;
+    }
+  },
+
+  /**
+   * Update an existing well
+   * @param {string|number} wellId - The well's ID
+   * @param {Object} wellData - The well data to update
+   * @returns {Promise<Object>} Updated well data
+   */
+  updateWell: async (wellId, wellData) => {
+    try {
+      if (!wellId) {
+        throw new Error('Well ID is required');
+      }
+      const response = await apiRequest.put(`${API_ENDPOINTS.wells.base}/${wellId}`, wellData);
+      return response;
+    } catch (error) {
+      handleApiError(error, 'Error updating well');
+      throw error;
+    }
+  },
+
+  /**
+   * Delete a well
+   * @param {string|number} wellId - The well's ID
+   * @returns {Promise<void>}
+   */
+  deleteWell: async (wellId) => {
+    try {
+      if (!wellId) {
+        throw new Error('Well ID is required');
+      }
+      await apiRequest.delete(`${API_ENDPOINTS.wells.base}/${wellId}`);
+    } catch (error) {
+      handleApiError(error, 'Error deleting well');
+      throw error;
+    }
+  },
+
+  /**
+   * Get wells by field name
+   * @param {string} fieldName - The field name to search for
+   * @returns {Promise<Array>} Array of wells in the specified field
+   */
+  getWellsByField: async (fieldName) => {
+    try {
+      if (!fieldName) {
+        throw new Error('Field name is required');
+      }
+      const response = await apiRequest.get(`${API_ENDPOINTS.wells.base}/field/${fieldName}`);
+      return Array.isArray(response) ? response : [];
+    } catch (error) {
+      handleApiError(error, 'Error fetching wells by field');
+      return [];
+    }
+  },
+
+  /**
+   * Search wells by various criteria
+   * @param {Object} searchParams - Search parameters
+   * @returns {Promise<Array>} Array of matching wells
+   */
+  searchWells: async (searchParams) => {
+    try {
+      const queryString = new URLSearchParams(searchParams).toString();
+      const response = await apiRequest.get(`${API_ENDPOINTS.wells.base}/search?${queryString}`);
+      return Array.isArray(response) ? response : [];
+    } catch (error) {
+      handleApiError(error, 'Error searching wells');
+      return [];
+    }
+  },
+
+  /**
+   * Validate well data before sending to the server
+   * @param {Object} wellData - The well data to validate
+   * @returns {Object} Validation result { isValid: boolean, errors: Object }
+   */
+  validateWellData: (wellData) => {
+    const errors = {};
+    
+    if (!wellData.well_name?.trim()) {
+      errors.well_name = 'Well name is required';
+    }
+    
+    if (!wellData.operator_id) {
+      errors.operator_id = 'Operator ID is required';
+    }
+
+    // Optional but recommended fields
+    if (wellData.api_number && !wellData.api_number.match(/^[0-9-]+$/)) {
+      errors.api_number = 'Invalid API number format';
+    }
+
+    return {
+      isValid: Object.keys(errors).length === 0,
+      errors
+    };
+  },
+/**
+   * Create a new well with complete details for FastAPI endpoint
+   * @param {Object} wellData - Complete well creation data
+   * @returns {Promise<Object>} Created well data
+   */
+createWellComplete: async (wellData) => {
+  try {
+    const { isValid, errors } = validateCompleteWellData(wellData);
+    
+    if (!isValid) {
+      throw new Error(`Invalid well data: ${JSON.stringify(errors)}`);
+    }
+
+    const requestData = {
+      ...wellData,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      // Ensure all required FastAPI fields are present
+      slot_id: wellData.slot_id || null,
+      well_name: wellData.well_name,
+      short_name: wellData.short_name || wellData.well_name,
+      formation_type: wellData.formation_type || null,
+      api_number: wellData.api_number || null,
+      spud_date: wellData.spud_date || null,
+      operator_id: wellData.operator_id,
+      well_type_id: wellData.well_type_id,
+      production_id: wellData.production_id || null,
+      well_shape_id: wellData.well_shape_id || null,
+      measured_depth: Number(wellData.measured_depth) || 0,
+      total_vertical_depth: Number(wellData.total_vertical_depth) || 0,
+      h2s: Boolean(wellData.h2s),
+      co2: Boolean(wellData.co2)
+    };
+
+    const response = await apiRequest.post(API_ENDPOINTS.wells.create, requestData);
+    return response;
+  } catch (error) {
+    handleApiError(error, 'Error creating well with complete details');
+    throw error;
+  }
+},
+
+
+/**
+ * Get all production types
+ * @returns {Promise<Array>} Array of production types
+ */
+getProductionTypes: async () => {
+  try {
+    const response = await apiRequest.get(API_ENDPOINTS.productionTypes.getAll);
+    return Array.isArray(response) ? response : [];
+  } catch (error) {
+    handleApiError(error, 'Error fetching production types');
+    return [];
+  }
+},
+
+/**
+ * Get all slots
+ * @returns {Promise<Array>} Array of slots
+ */
+getSlots: async () => {
+  try {
+    const response = await apiRequest.get(API_ENDPOINTS.slots.getAll);
+    return Array.isArray(response) ? response : [];
+  } catch (error) {
+    handleApiError(error, 'Error fetching slots');
+    return [];
+  }
+},
+
+/**
+ * Get all well shapes
+ * @returns {Promise<Array>} Array of well shapes
+ */
+getWellShapes: async () => {
+  try {
+    const response = await apiRequest.get(API_ENDPOINTS.wellShapes.getAll);
+    return Array.isArray(response) ? response : [];
+  } catch (error) {
+    handleApiError(error, 'Error fetching well shapes');
+    return [];
+  }
+},
+/**
+ * Validate complete well data before sending to FastAPI
+ * @param {Object} wellData - The complete well data to validate
+ * @returns {Object} Validation result { isValid: boolean, errors: Object }
+ */
+validateCompleteWellData: (wellData) => {
+  const errors = {};
+  
+  // Required fields validation
+  if (!wellData.well_name?.trim()) {
+    errors.well_name = 'Well name is required';
+  }
+  
+  if (!wellData.operator_id) {
+    errors.operator_id = 'Operator ID is required';
+  }
+
+  if (!wellData.well_type_id) {
+    errors.well_type_id = 'Well type ID is required';
+  }
+
+  // API number format validation (if provided)
+  if (wellData.api_number && !wellData.api_number.match(/^[0-9-]+$/)) {
+    errors.api_number = 'Invalid API number format';
+  }
+
+  // Depth validations
+  const measuredDepth = Number(wellData.measured_depth);
+  if (!isNaN(measuredDepth) && measuredDepth < 0) {
+    errors.measured_depth = 'Measured depth must be non-negative';
+  }
+
+  const totalVerticalDepth = Number(wellData.total_vertical_depth);
+  if (!isNaN(totalVerticalDepth) && totalVerticalDepth < 0) {
+    errors.total_vertical_depth = 'Total vertical depth must be non-negative';
+  }
+
+  // Date validation (if provided)
+  if (wellData.spud_date && !isValidISODate(wellData.spud_date)) {
+    errors.spud_date = 'Invalid spud date format';
+  }
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors
+  };
+}
+};
+
+/**
+* Helper function to validate ISO date format
+* @param {string} dateString - Date string to validate
+* @returns {boolean} Whether the date is valid
+*/
+function isValidISODate(dateString) {
+const date = new Date(dateString);
+return date instanceof Date && !isNaN(date.getTime());
+}
+
+export default wellService;
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,57 +1,17 @@
 // src/services/jobCenterService.js
-import apiRequest, { API_ENDPOINTS } from '../utils/apiUtils';
-
-const BASE_URL = '/job-centers';
-
-const handleError = (error, message) => {
-  console.error(`Job Center Service Error - ${message}:`, error);
-  if (error.response?.data?.detail) {
-    throw new Error(error.response.data.detail);
-  }
-  throw error;
-};
+// src/services/jobCenterService.js
+import api, { API_ENDPOINTS } from './api';
 
 const jobCenterService = {
-  getJobCenters: async () => {
-    try {
-      const response = await apiRequest.get(BASE_URL, {
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      });
-      return response;
-    } catch (error) {
-      handleError(error, 'Error fetching job centers');
-    }
-  },
-
-  getActiveJobCenters: async () => {
-    try {
-      const response = await apiRequest.get(`${BASE_URL}/active`, {
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-      return response;
-    } catch (error) {
-      handleError(error, 'Error fetching active job centers');
-    }
-  },
-
-  getJobCenterByWell: async (wellName) => {
-    try {
-      const response = await apiRequest.get(`${BASE_URL}/well/${wellName}`, {
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-      return response;
-    } catch (error) {
-      handleError(error, 'Error fetching job center by well');
-    }
-  }
+  getAll: () => api.get(API_ENDPOINTS.jobCenters.getAll),
+  getActive: () => api.get(API_ENDPOINTS.jobCenters.getActive),
+  getByWell: (wellName) => api.get(API_ENDPOINTS.jobCenters.getByWell(wellName)),
+  getByShortName: (shortName) => api.get(API_ENDPOINTS.jobCenters.getByShortName(shortName)),
+  getByCountry: (country) => api.get(API_ENDPOINTS.jobCenters.getByCountry(country)),
+  getByDateRange: (startDate, endDate) => api.get(API_ENDPOINTS.jobCenters.getByDateRange(startDate, endDate)),
+  create: (data) => api.post(API_ENDPOINTS.jobCenters.create, data),
+  update: (id, data) => api.put(API_ENDPOINTS.jobCenters.update(id), data),
+  delete: (id) => api.delete(API_ENDPOINTS.jobCenters.delete(id))
 };
 
 export default jobCenterService;
-

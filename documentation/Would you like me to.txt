@@ -1,0 +1,18 @@
+Would you like me to:
+
+
+
+Add any specific functionality to the profile or help center sections?
+Add any additional features to the job listing?
+Now we need to update the JobDashboard to integrate these modals. Would you like me to:
+Update the JobDashboard component to include these modals?
+Add the necessary state management for showing/hiding modals?
+Add handlers for form submission and settings updates?
+Create any additional utility functions for managing the settings in localStorage?
+Add persistence for the settings using localStorage?
+Add more functionality to any specific section?
+Enhance the modal interactions?
+Add any additional features to the dashboard?
+
+
+i created a database with script attached herewith in mssql server, i need you to create pydantic classes and schema in my fastapi application. for tables with primary key nvarchar(50), generate the uuid and convert to string for those tables.

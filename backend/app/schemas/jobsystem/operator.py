@@ -8,6 +8,7 @@ from app.models.base import TimeStampSchema
 class OperatorBase(TimeStampSchema):
     operator_name: str
     company_code: str
+    account: Optional[str] = None
     address_1: Optional[str] = None
     address_2: Optional[str] = None
     post_code: Optional[str] = None
@@ -20,6 +21,7 @@ class OperatorBase(TimeStampSchema):
 class OperatorCreate(OperatorBase):
     operator_name: str
     company_code: str
+    account: Optional[str] = None
     address_1: Optional[str] = None
     address_2: Optional[str] = None
     post_code: Optional[str] = None

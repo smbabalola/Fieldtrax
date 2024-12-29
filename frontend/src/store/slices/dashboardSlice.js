@@ -1,3 +1,4 @@
+// frontend\src\store\slices\dashboardSlice.js
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import authService from '../../services/authService';
 

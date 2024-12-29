@@ -1,142 +1,170 @@
-// File: /frontend/src/pages/job/JobDetail.jsx
-import React, { useEffect } from 'react';
+// File: /frontend/src/pages/jobs/JobDetails.jsx
+import React, { useState, useEffect } from 'react';
+import { Card, Tab, Nav, Spinner, Alert } from 'react-bootstrap';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useDispatch, useSelector } from 'react-redux';
-import { 
-  fetchJobDetails,
-  selectSelectedJob,
-  selectJobsLoading,
-  selectJobsError
-} from '../../store/slices/jobsSlice';
-import LoadingSpinner from '../../components/common/LoadingSpinner';
-import { toast } from 'react-toastify';
 
-const JobDetail = () => {
-  const { id } = useParams();
+const JobDetailsHeader = ({ job }) => {
+  if (!job) return null;
+  
+  return (
+    <Card className="mb-4 shadow-sm">
+      <Card.Body>
+        <div className="d-flex justify-content-between align-items-center">
+          <div>
+            <h4 className="mb-1">{job.jobName}</h4>
+            <p className="text-muted mb-0">
+              {job.operator} • {job.wellName} • {job.field}, {job.country}
+            </p>
+          </div>
+          <div className="text-end">
+            <span className={`badge bg-${job.status === 'active' ? 'success' : 'secondary'}`}>
+              {job.status}
+            </span>
+          </div>
+        </div>
+      </Card.Body>
+    </Card>
+  );
+};
+
+const LoadingSpinner = () => (
+  <div className="text-center p-5">
+    <Spinner animation="border" role="status" variant="primary">
+      <span className="visually-hidden">Loading...</span>
+    </Spinner>
+  </div>
+);
+
+const JobDetails = () => {
+  const { jobId } = useParams();
   const navigate = useNavigate();
-  const dispatch = useDispatch();
-
-  const job = useSelector(selectSelectedJob);
-  const loading = useSelector(selectJobsLoading);
-  const error = useSelector(selectJobsError);
+  const [activeTab, setActiveTab] = useState('jobInfo');
+  const [job, setJob] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    dispatch(fetchJobDetails(id));
-  }, [dispatch, id]);
+    const fetchJobDetails = async () => {
+      try {
+        setLoading(true);
+        // TODO: Replace with actual API call
+        // const response = await jobService.getJobById(jobId);
+        // setJob(response.data);
+        
+        // Temporary mock data
+        setTimeout(() => {
+          setJob({
+            jobName: 'Test Job',
+            operator: 'Test Operator',
+            wellName: 'Test Well',
+            field: 'Test Field',
+            country: 'Test Country',
+            status: 'active'
+          });
+          setLoading(false);
+        }, 1000);
+      } catch (err) {
+        setError(err.message || 'Failed to fetch job details');
+        setLoading(false);
+      }
+    };
 
-  if (loading) return <LoadingSpinner />;
+    if (jobId) {
+      fetchJobDetails();
+    }
+  }, [jobId]);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
   if (error) {
-    toast.error(error);
     return (
-      <div className="alert alert-danger">
-        Error loading job details: {error}
-      </div>
+      <Alert variant="danger">
+        <Alert.Heading>Error Loading Job Details</Alert.Heading>
+        <p>{error}</p>
+        <div className="d-flex justify-content-end">
+          <button 
+            className="btn btn-outline-danger"
+            onClick={() => navigate('/dashboard')}
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </Alert>
     );
   }
-  if (!job) return null;
+
+  if (!job) {
+    return (
+      <Alert variant="warning">
+        <Alert.Heading>Job Not Found</Alert.Heading>
+        <p>The requested job could not be found.</p>
+        <div className="d-flex justify-content-end">
+          <button 
+            className="btn btn-outline-warning"
+            onClick={() => navigate('/dashboard')}
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </Alert>
+    );
+  }
 
   return (
-    <div className="job-detail">
-      {/* Header */}
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2>Job Details: {job.job_number}</h2>
-        <div className="d-flex gap-2">
-          <button
-            className="btn btn-outline-primary"
-            onClick={() => navigate(`/jobs/${id}/edit`)}
+    <div className="job-details">
+      <JobDetailsHeader job={job} />
+      
+      <Card className="shadow-sm">
+        <Card.Header className="bg-white">
+          <Nav 
+            variant="tabs" 
+            className="flex-nowrap overflow-auto hide-scrollbar border-bottom-0"
+            style={{ marginBottom: '-0.5rem' }}
           >
-            Edit Job
-          </button>
-          <button
-            className="btn btn-outline-secondary"
-            onClick={() => navigate('/jobs')}
-          >
-            Back to Jobs
-          </button>
-        </div>
-      </div>
+            <Nav.Item>
+              <Nav.Link 
+                active={activeTab === 'jobInfo'}
+                onClick={() => setActiveTab('jobInfo')}
+              >
+                Job Info
+              </Nav.Link>
+            </Nav.Item>
+            <Nav.Item>
+              <Nav.Link 
+                active={activeTab === 'wellInfo'}
+                onClick={() => setActiveTab('wellInfo')}
+              >
+                Well Info
+              </Nav.Link>
+            </Nav.Item>
+            {/* ... rest of the tabs ... */}
+          </Nav>
+        </Card.Header>
 
-      {/* Job Information */}
-      <div className="row">
-        <div className="col-md-8">
-          <div className="card shadow-sm mb-4">
-            <div className="card-body">
-              <h5 className="card-title mb-4">Job Information</h5>
-              <div className="row g-3">
-                <div className="col-md-6">
-                  <label className="text-muted">Job Number</label>
-                  <p className="mb-3">{job.job_number}</p>
-                </div>
-                <div className="col-md-6">
-                  <label className="text-muted">Well Name</label>
-                  <p className="mb-3">{job.well_name}</p>
-                </div>
-                <div className="col-md-6">
-                  <label className="text-muted">Status</label>
-                  <p className="mb-3">
-                    <span className={`badge ${
-                      job.status === 'Active' ? 'bg-success' :
-                      job.status === 'Planned' ? 'bg-primary' :
-                      job.status === 'Completed' ? 'bg-info' :
-                      'bg-secondary'
-                    }`}>
-                      {job.status}
-                    </span>
-                  </p>
-                </div>
-                <div className="col-md-6">
-                  <label className="text-muted">Spud Date</label>
-                  <p className="mb-3">
-                    {new Date(job.spud_date).toLocaleDateString()}
-                  </p>
-                </div>
-                <div className="col-md-6">
-                  <label className="text-muted">Field</label>
-                  <p className="mb-3">{job.field}</p>
-                </div>
-                <div className="col-md-6">
-                  <label className="text-muted">Country</label>
-                  <p className="mb-3">{job.country}</p>
-                </div>
-              </div>
-            </div>
-          </div>
+        <Card.Body className="p-4">
+          {activeTab === 'jobInfo' && (
+            <div>Job Info Content</div>
+          )}
+          {activeTab === 'wellInfo' && (
+            <div>Well Info Content</div>
+          )}
+          {/* ... rest of the tab content ... */}
+        </Card.Body>
+      </Card>
 
-          {/* Additional sections can be added here based on your needs */}
-          {/* For example: Well Information, Equipment, Personnel, etc. */}
-        </div>
-
-        {/* Sidebar */}
-        <div className="col-md-4">
-          {/* Quick Actions */}
-          <div className="card shadow-sm mb-4">
-            <div className="card-body">
-              <h5 className="card-title mb-3">Quick Actions</h5>
-              <div className="d-grid gap-2">
-                <button className="btn btn-outline-primary">
-                  View Well Information
-                </button>
-                <button className="btn btn-outline-primary">
-                  View Service Tickets
-                </button>
-                <button className="btn btn-outline-primary">
-                  View Purchase Orders
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Job Statistics */}
-          <div className="card shadow-sm">
-            <div className="card-body">
-              <h5 className="card-title mb-3">Job Statistics</h5>
-              {/* Add relevant statistics here */}
-            </div>
-          </div>
-        </div>
-      </div>
+      <style>{`
+        .hide-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .hide-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}</style>
     </div>
   );
 };
 
-export default JobDetail;
+export default JobDetails;

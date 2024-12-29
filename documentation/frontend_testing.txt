@@ -1,0 +1,816 @@
+# tests/conftest.py
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from app.database import Base
+from app.core.config import settings
+from fastapi.testclient import TestClient
+from backend.app.db.session import get_db
+from main import app
+
+@pytest.fixture(scope="session")
+def test_db():
+    # Use SQLite in-memory database for testing
+    SQLALCHEMY_TEST_DATABASE_URL = "sqlite:///./test.db"
+    engine = create_engine(
+        SQLALCHEMY_TEST_DATABASE_URL, connect_args={"check_same_thread": False}
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+    # Create test database
+    Base.metadata.create_all(bind=engine)
+    
+    yield TestingSessionLocal()
+    
+    # Drop test database
+    Base.metadata.drop_all(bind=engine)
+
+@pytest.fixture(scope="function")
+def test_client(test_db):
+    def override_get_db():
+        try:
+            yield test_db
+        finally:
+            test_db.close()
+    
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as client:
+        yield client
+
+# tests/test_auth.py
+import pytest
+from app.core.security import create_access_token
+from app.models.user import User
+
+def test_login_success(test_client, test_db):
+    # Create test user
+    user = User(
+        email="test@example.com",
+        hashed_password="$2b$12$test_hash"
+    )
+    test_db.add(user)
+    test_db.commit()
+    
+    response = test_client.post(
+        "/api/auth/login",
+        json={"email": "test@example.com", "password": "testpass"}
+    )
+    assert response.status_code == 200
+    assert "access_token" in response.json()
+
+def test_login_invalid_credentials(test_client):
+    response = test_client.post(
+        "/api/auth/login",
+        json={"email": "wrong@example.com", "password": "wrongpass"}
+    )
+    assert response.status_code == 401
+
+def test_password_reset_request(test_client, test_db):
+    response = test_client.post(
+        "/api/auth/password-reset",
+        json={"email": "test@example.com"}
+    )
+    assert response.status_code == 200
+
+# tests/test_jobs.py
+from app.models.job.models import Job, DailyReport
+from datetime import datetime
+
+def test_create_job(test_client, test_db):
+    job_data = {
+        "well_name": "Test Well",
+        "field": "Test Field",
+        "country": "Test Country",
+        "spuddate": datetime.utcnow().isoformat()
+    }
+    
+    response = test_client.post("/api/jobs/", json=job_data)
+    assert response.status_code == 201
+    assert response.json()["well_name"] == "Test Well"
+
+def test_get_job(test_client, test_db):
+    # Create test job
+    job = Job(
+        well_name="Test Well",
+        field="Test Field",
+        country="Test Country",
+        spuddate=datetime.utcnow()
+    )
+    test_db.add(job)
+    test_db.commit()
+    
+    response = test_client.get(f"/api/jobs/{job.id}")
+    assert response.status_code == 200
+    assert response.json()["well_name"] == "Test Well"
+
+def test_update_job(test_client, test_db):
+    # Create test job
+    job = Job(
+        well_name="Test Well",
+        field="Test Field",
+        country="Test Country",
+        spuddate=datetime.utcnow()
+    )
+    test_db.add(job)
+    test_db.commit()
+    
+    update_data = {"well_name": "Updated Well"}
+    response = test_client.patch(f"/api/jobs/{job.id}", json=update_data)
+    assert response.status_code == 200
+    assert response.json()["well_name"] == "Updated Well"
+
+# tests/test_daily_reports.py
+def test_create_daily_report(test_client, test_db):
+    # Create test job first
+    job = Job(
+        well_name="Test Well",
+        field="Test Field",
+        country="Test Country",
+        spuddate=datetime.utcnow()
+    )
+    test_db.add(job)
+    test_db.commit()
+    
+    report_data = {
+        "job_id": str(job.id),
+        "report_date": datetime.utcnow().isoformat(),
+        "operations": ["Test operation"],
+        "summary": "Test summary"
+    }
+    
+    response = test_client.post("/api/daily-reports/", json=report_data)
+    assert response.status_code == 201
+    assert response.json()["summary"] == "Test summary"
+
+def test_get_daily_reports(test_client, test_db):
+    # Create test job and report
+    job = Job(
+        well_name="Test Well",
+        field="Test Field",
+        country="Test Country",
+        spuddate=datetime.utcnow()
+    )
+    test_db.add(job)
+    
+    report = DailyReport(
+        job_id=job.id,
+        report_date=datetime.utcnow(),
+        operations=["Test operation"],
+        summary="Test summary"
+    )
+    test_db.add(report)
+    test_db.commit()
+    
+    response = test_client.get(f"/api/jobs/{job.id}/daily-reports")
+    assert response.status_code == 200
+    assert len(response.json()) > 0
+
+# tests/test_websocket.py
+from fastapi.websockets import WebSocket
+from app.core.ws.manager import ConnectionManager
+
+async def test_websocket_connection(test_client):
+    manager = ConnectionManager()
+    
+    # Test connection
+    websocket = WebSocket()
+    await manager.connect(websocket, "test_job_id", "test_user_id")
+    assert len(manager.active_connections) == 1
+    
+    # Test disconnection
+    await manager.disconnect(websocket)
+    assert len(manager.active_connections) == 0
+
+# tests/test_units.py
+from app.core.units.quantity import Depth, Length, Pressure
+
+def test_depth_conversion():
+    depth = Depth(100, "ft")
+    assert abs(depth.to_unit("m") - 30.48) < 0.01
+
+def test_pressure_calculation():
+    depth = Depth(1000, "ft")
+    density = 8.6  # ppg
+    pressure = depth.calculate_hydrostatic_pressure(density)
+    assert abs(pressure.to_unit("psi") - 447.2) < 0.1
+
+// src/__tests__/LoginForm.test.jsx
+// import React from 'react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, expect, it, beforeEach, jest } from '@jest/globals';
+import { BrowserRouter } from 'react-router-dom';
+import { LoginForm } from '../components/auth/LoginForm';
+import { AuthContext } from '../context/AuthContext';
+
+// Create mock for useNavigate
+const mockNavigate = jest.fn();
+
+// Mock the entire react-router-dom module
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+  useNavigate: () => mockNavigate
+}));
+
+describe('LoginForm', () => {
+  const mockLogin = jest.fn();
+  
+  // Helper function to render LoginForm with required providers
+  const renderLoginForm = () => {
+    return render(
+      <BrowserRouter>
+        <AuthContext.Provider value={{ login: mockLogin, isAuthenticated: false }}>
+          <LoginForm />
+        </AuthContext.Provider>
+      </BrowserRouter>
+    );
+  };
+
+  // Clear all mocks before each test
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('renders login form', () => {
+    renderLoginForm();
+    expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+  });
+
+  it('handles successful login', async () => {
+    mockLogin.mockResolvedValueOnce({ id: 1, username: 'testuser' });
+    renderLoginForm();
+
+    fireEvent.change(screen.getByLabelText(/username/i), {
+      target: { value: 'testuser' },
+    });
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: 'password123' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(mockLogin).toHaveBeenCalledWith('testuser', 'password123');
+      expect(mockNavigate).toHaveBeenCalledWith('/dashboard');
+    });
+  });
+
+  it('handles login failure', async () => {
+    mockLogin.mockRejectedValueOnce(new Error('Invalid credentials'));
+    renderLoginForm();
+
+    fireEvent.change(screen.getByLabelText(/username/i), {
+      target: { value: 'wronguser' },
+    });
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: 'wrongpass' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/invalid username or password/i)).toBeInTheDocument();
+    });
+  });
+});
+
+// src/setupTests.js
+import '@testing-library/jest-dom';
+// import jest from 'jest';
+import { afterEach, beforeEach, jest } from '@jest/globals';
+import '@testing-library/jest-dom';
+
+import '@testing-library/jest-dom';
+
+// src/setupTests.js
+/* global global */
+/* global window */
+/* global jest */
+// const { jest } = require('@jest/globals');
+// require('@testing-library/jest-dom');
+
+// Mock IndexedDB
+const mockIndexedDB = {
+  open: jest.fn(),
+  deleteDatabase: jest.fn(),
+};
+
+// Define window if it doesn't exist (for Node environment)
+if (typeof window === 'undefined') {
+  global.window = {};
+}
+
+window.indexedDB = mockIndexedDB;
+
+// Mock fetch
+if (typeof global !== 'undefined') {
+  global.fetch = jest.fn();
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+});
+
+afterEach(() => {
+  jest.clearAllMocks();
+});
+
+module.exports = {
+  root: true,
+  env: {
+    browser: true,
+    es2020: true,
+    jest: true,
+    node: true
+  },
+  extends: [
+    'eslint:recommended',
+    'plugin:react/recommended',
+    'plugin:react/jsx-runtime',
+    'plugin:react-hooks/recommended',
+    'plugin:jest/recommended',
+    'plugin:testing-library/react'
+  ],
+  ignorePatterns: ['dist', '.eslintrc.cjs'],
+  parserOptions: {
+    ecmaVersion: 'latest',
+    sourceType: 'module',
+    ecmaFeatures: {
+      jsx: true
+    }
+  },
+  settings: {
+    react: {
+      version: '18.2'
+    },
+    jest: {
+      version: 29
+    }
+  },
+  plugins: [
+    'react-refresh',
+    'jest',
+    'testing-library'
+  ],
+  rules: {
+    'react-refresh/only-export-components': [
+      'warn',
+      { allowConstantExport: true },
+    ],
+    'react/react-in-jsx-scope': 'off',
+    'jest/no-disabled-tests': 'warn',
+    'jest/no-focused-tests': 'error',
+    'jest/no-identical-title': 'error',
+    'jest/prefer-to-have-length': 'warn',
+    'jest/valid-expect': 'error',
+    'testing-library/await-async-queries': 'error',
+    'testing-library/no-await-sync-queries': 'error',
+    'testing-library/no-container': 'error',
+    'testing-library/no-debugging-utils': 'warn'
+  },
+  globals: {
+    jest: 'readonly',
+    describe: 'readonly',
+    it: 'readonly',
+    test: 'readonly',
+    expect: 'readonly',
+    beforeEach: 'readonly',
+    afterEach: 'readonly',
+    beforeAll: 'readonly',
+    afterAll: 'readonly',
+    window: 'readonly',
+    global: 'writable',
+    process: 'readonly',
+    module: 'readonly',
+    require: 'readonly'
+  }
+};
+
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "test": "jest --config jest.config.cjs",
+    "test:watch": "jest --config jest.config.cjs --watch",
+    "test:coverage": "jest --config jest.config.cjs --coverage",
+    "lint:fix": "eslint --fix 'src/**/*.{js,jsx}'"
+  },
+  "dependencies": {
+    "idb": "^8.0.0",
+    "prop-types": "^15.8.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.23.9",
+    "@babel/preset-env": "^7.23.9",
+    "@babel/preset-react": "^7.23.9",
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/react": "^14.2.1",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/jest": "^29.5.12",
+    "@types/react": "^18.2.55",
+    "@types/react-dom": "^18.2.19",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "babel-jest": "^29.7.0",
+    "eslint": "^8.56.0",
+    "eslint-plugin-jest": "^27.6.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "eslint-plugin-testing-library": "^6.2.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.1.0"
+  }
+}
+
+// .eslintrc.cjs
+module.exports = {
+    root: true,
+    env: {
+      browser: true,
+      es2020: true,
+      jest: true,
+      node: true
+    },
+    extends: [
+      'eslint:recommended',
+      'plugin:react/recommended',
+      'plugin:react/jsx-runtime',
+      'plugin:react-hooks/recommended',
+      'plugin:jest/recommended',
+      'plugin:testing-library/react'
+    ],
+    ignorePatterns: ['dist', '.eslintrc.cjs'],
+    parserOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      ecmaFeatures: {
+        jsx: true
+      }
+    },
+    settings: {
+      react: {
+        version: '18.2'
+      },
+      jest: {
+        version: 29
+      }
+    },
+    plugins: [
+      'react-refresh',
+      'jest',
+      'testing-library'
+    ],
+    rules: {
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
+      ],
+      'react/react-in-jsx-scope': 'off',
+      'jest/no-disabled-tests': 'warn',
+      'jest/no-focused-tests': 'error',
+      'jest/no-identical-title': 'error',
+      'jest/prefer-to-have-length': 'warn',
+      'jest/valid-expect': 'error',
+      'testing-library/await-async-queries': 'error',
+      'testing-library/no-await-sync-queries': 'error',
+      'testing-library/no-container': 'error',
+      'testing-library/no-debugging-utils': 'warn'
+    },
+    globals: {
+      jest: 'readonly',
+      describe: 'readonly',
+      it: 'readonly',
+      test: 'readonly',
+      expect: 'readonly',
+      beforeEach: 'readonly',
+      afterEach: 'readonly',
+      beforeAll: 'readonly',
+      afterAll: 'readonly',
+      window: 'readonly',
+      global: 'readonly',
+      require: 'readonly',
+      module: 'readonly',
+      process: 'readonly'
+    },
+    overrides: [
+      {
+        files: [
+          '**/__tests__/**/*.[jt]s?(x)',
+          '**/?(*.)+(spec|test).[jt]s?(x)',
+          '**/setupTests.[jt]s',
+          '**/__mocks__/**/*.[jt]s?(x)'
+        ],
+        env: {
+          jest: true,
+          node: true
+        },
+        globals: {
+          window: true,
+          global: true,
+          jest: true
+        }
+      }
+    ]
+  };
+
+// jest.config.cjs
+module.exports = {
+    testEnvironment: 'jsdom',
+    setupFilesAfterEnv: ['<rootDir>/src/setupTests.js'],
+    moduleNameMapper: {
+      '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
+      '\\.(gif|ttf|eot|svg|png)$': '<rootDir>/src/__mocks__/fileMock.js'
+    },
+    transform: {
+      '^.+\\.(js|jsx|mjs)$': ['babel-jest', { presets: ['@babel/preset-env', '@babel/preset-react'] }]
+    },
+    transformIgnorePatterns: [
+      '/node_modules/(?!(@testing-library/jest-dom)/)'
+    ],
+    testEnvironmentOptions: {
+      customExportConditions: [''],
+    },
+    moduleFileExtensions: ['js', 'jsx', 'mjs', 'json'],
+    testMatch: [
+      '<rootDir>/src/**/__tests__/**/*.{js,jsx}',
+      '<rootDir>/src/**/*.{spec,test}.{js,jsx}'
+    ],
+    collectCoverageFrom: [
+      'src/**/*.{js,jsx}',
+      '!src/main.jsx',
+      '!src/vite-env.d.ts',
+      '!**/node_modules/**'
+    ],
+    coverageThreshold: {
+      global: {
+        branches: 80,
+        functions: 80,
+        lines: 80,
+        statements: 80
+      }
+    },
+    verbose: true,
+    globals: {
+      'jest': true,
+      'JSX': true
+    },
+    testPathIgnorePatterns: ['/node_modules/'],
+    moduleDirectories: ['node_modules', 'src']
+  };
+
+// babel.config.cjs
+module.exports = {
+    presets: [
+      ['@babel/preset-env', { targets: { node: 'current' } }],
+      ['@babel/preset-react', { runtime: 'automatic' }]
+    ]
+  };
+
+// // src/__mocks__/fileMock.js
+// module.exports = 'test-file-stub';
+
+// src/__mocks__/fileMock.js
+export default 'test-file-stub';
+
+
+// src/__tests__/WorkOrderList.test.jsx
+// import { WorkOrderList } from '../components/WorkOrderList';
+// import jest from 'jest';
+
+import { render, screen, waitFor } from '@testing-library/react';
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { WorkOrderList } from '../components/WorkOrderList';
+import { WorkOrderManager } from '../lib/offline';
+
+
+jest.mock('../lib/offline');
+
+describe('WorkOrderList', () => {
+  const mockWorkOrders = [
+    {
+      id: '1',
+      title: 'Work Order 1',
+      status: 'pending',
+      location: 'Location 1',
+      createdAt: '2024-01-01T00:00:00Z',
+      modifiedAt: '2024-01-01T00:00:00Z'
+    },
+    {
+      id: '2',
+      title: 'Work Order 2',
+      status: 'in-progress',
+      location: 'Location 2',
+      createdAt: '2024-01-02T00:00:00Z',
+      modifiedAt: '2024-01-02T00:00:00Z'
+    }
+  ];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    WorkOrderManager.mockImplementation(() => ({
+      listWorkOrders: jest.fn().mockResolvedValue(mockWorkOrders)
+    }));
+  });
+
+  test('renders work order list', async () => {
+    render(<WorkOrderList />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Work Order 1')).toBeInTheDocument();
+      expect(screen.getByText('Work Order 2')).toBeInTheDocument();
+    });
+  });
+
+  test('displays offline warning when not connected', async () => {
+    const originalNavigator = { ...window.navigator };
+    Object.defineProperty(window, 'navigator', {
+      value: { ...originalNavigator, onLine: false },
+      writable: true
+    });
+
+    render(<WorkOrderList />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/you are currently offline/i)).toBeInTheDocument();
+    });
+
+    // Restore original navigator
+    Object.defineProperty(window, 'navigator', {
+      value: originalNavigator,
+      writable: true
+    });
+  });
+
+  test('displays sync status for pending items', async () => {
+    const mockWorkOrdersWithPending = [
+      ...mockWorkOrders,
+      {
+        id: '3',
+        title: 'Pending Work Order',
+        status: 'pending',
+        syncStatus: 'pending',
+        location: 'Location 3',
+        createdAt: '2024-01-03T00:00:00Z',
+        modifiedAt: '2024-01-03T00:00:00Z'
+      }
+    ];
+
+    WorkOrderManager.mockImplementation(() => ({
+      listWorkOrders: jest.fn().mockResolvedValue(mockWorkOrdersWithPending)
+    }));
+
+    render(<WorkOrderList />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/pending sync/i)).toBeInTheDocument();
+    });
+  });
+});
+// src/__tests__/WorkOrderForm.test.jsx
+// import { WorkOrderForm } from '../components/WorkOrderForm';
+// import { FieldTraxDB, SyncManager, WorkOrderManager } from '../lib/offline';
+// import jest from 'jest';
+
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { WorkOrderForm } from '../components/WorkOrderForm';
+import { WorkOrderManager } from '../lib/offline';
+
+jest.mock('../lib/offline');
+
+describe('WorkOrderForm', () => {
+  const mockOnSubmit = jest.fn();
+  const mockCreateWorkOrder = jest.fn();
+  const mockUpdateWorkOrder = jest.fn();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    WorkOrderManager.mockImplementation(() => ({
+      createWorkOrder: mockCreateWorkOrder,
+      updateWorkOrder: mockUpdateWorkOrder
+    }));
+  });
+
+  test('renders empty form for new work order', () => {
+    render(<WorkOrderForm onSubmit={mockOnSubmit} />);
+    
+    expect(screen.getByLabelText(/title/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/location/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/priority/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /create work order/i })).toBeInTheDocument();
+  });
+
+  test('renders form with initial data for editing', () => {
+    const initialData = {
+      id: '123',
+      title: 'Test Work Order',
+      description: 'Test Description',
+      location: 'Test Location',
+      priority: 'high',
+      status: 'pending'
+    };
+
+    render(<WorkOrderForm onSubmit={mockOnSubmit} initialData={initialData} />);
+    
+    expect(screen.getByLabelText(/title/i)).toHaveValue('Test Work Order');
+    expect(screen.getByLabelText(/description/i)).toHaveValue('Test Description');
+    expect(screen.getByLabelText(/location/i)).toHaveValue('Test Location');
+    expect(screen.getByLabelText(/priority/i)).toHaveValue('high');
+  });
+
+  test('handles work order creation', async () => {
+    mockCreateWorkOrder.mockResolvedValueOnce({ id: '123' });
+    render(<WorkOrderForm onSubmit={mockOnSubmit} />);
+
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: 'New Work Order' },
+    });
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: 'New Description' },
+    });
+    fireEvent.change(screen.getByLabelText(/location/i), {
+      target: { value: 'New Location' },
+    });
+    fireEvent.change(screen.getByLabelText(/priority/i), {
+      target: { value: 'high' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /create work order/i }));
+
+    await waitFor(() => {
+      expect(mockCreateWorkOrder).toHaveBeenCalledWith({
+        title: 'New Work Order',
+        description: 'New Description',
+        location: 'New Location',
+        priority: 'high',
+        status: 'pending'
+      });
+      expect(mockOnSubmit).toHaveBeenCalled();
+    });
+  });
+});
+
+// src/__tests__/ForgotPasswordForm.test.jsx
+// import jest from 'jest';
+import { ForgotPasswordForm } from '../components/auth/ForgotPasswordForm';
+import { passwordService } from '../lib/auth/passwordService';
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+
+
+jest.mock('../lib/auth/passwordService');
+
+describe('ForgotPasswordForm', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('renders forgot password form', () => {
+    render(<ForgotPasswordForm />);
+    expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send reset link/i })).toBeInTheDocument();
+  });
+
+  test('handles successful password reset request', async () => {
+    passwordService.requestReset.mockResolvedValueOnce();
+    render(<ForgotPasswordForm />);
+
+    fireEvent.change(screen.getByLabelText(/email address/i), {
+      target: { value: 'test@example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send reset link/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/check your email/i)).toBeInTheDocument();
+    });
+  });
+
+  test('handles password reset request failure', async () => {
+    passwordService.requestReset.mockRejectedValueOnce(new Error('Failed to send'));
+    render(<ForgotPasswordForm />);
+
+    fireEvent.change(screen.getByLabelText(/email address/i), {
+      target: { value: 'test@example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send reset link/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to send reset email/i)).toBeInTheDocument();
+    });
+  });
+});

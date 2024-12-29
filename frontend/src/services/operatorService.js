@@ -1,26 +1,12 @@
-// src/services/operatorService.js
-import apiRequest, { API_ENDPOINTS, handleApiError } from '../utils/apiUtils';
+import api, { API_ENDPOINTS } from './api';
 
 const operatorService = {
-  getOperators: async (params = {}) => {
-    try {
-      const response = await apiRequest.get(API_ENDPOINTS.operators.getAll, {
-        params
-      });
-      return response.data; // Only return the data
-    } catch (error) {
-      handleApiError(error, 'Error fetching operators');
-    }
-  },
-
-  getOperatorByName: async (name) => {
-    try {
-      const response = await apiRequest.get(API_ENDPOINTS.operators.getByName(name));
-      return response.data; // Only return the data
-    } catch (error) {
-      handleApiError(error, 'Error fetching operator by name');
-    }
-  }
+  getAll: () => api.get(API_ENDPOINTS.operators.getAll),
+  getByName: (name) => api.get(API_ENDPOINTS.operators.getByName(name)),
+  getByCode: (code) => api.get(API_ENDPOINTS.operators.getByCode(code)),
+  create: (data) => api.post(API_ENDPOINTS.operators.create, data),
+  update: (id, data) => api.put(API_ENDPOINTS.operators.update(id), data),
+  delete: (id) => api.delete(API_ENDPOINTS.operators.delete(id))
 };
 
 export default operatorService;

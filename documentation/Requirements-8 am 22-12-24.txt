@@ -1,0 +1,981 @@
+1. Core Components:
+
+```plaintext
+
+/src/components/jobs/CreateJob/tabs/WellInfoTab.jsx
+// File: /src/components/jobs/CreateJob/tabs/WellInfoTab.jsx
+import React, { useState, useEffect } from 'react';
+import { Form, Row, Col, Card, Button } from 'react-bootstrap';
+import { DataTable } from '../../../common/DataTable';
+import wellService from '../../../../services/wellService';
+import WellDetailModal from '../../../wells/WellDetailModal';
+import { toast } from 'react-toastify';
+
+const WellInfoTab = ({ data, onChange, errors = {} }) => {
+  // State
+  const [loading, setLoading] = useState(false);
+  const [wells, setWells] = useState([]);
+  const [showWellModal, setShowWellModal] = useState(false);
+  const [selectedWell, setSelectedWell] = useState(null);
+  const [error, setError] = useState(null);
+
+  // Table Columns
+  const columns = [
+    { field: 'well_name', header: 'Well Name', sortable: true },
+    { field: 'api_number', header: 'API Number', sortable: true },
+    { field: 'field_name', header: 'Field Name', sortable: true },
+    { field: 'location', header: 'Location', sortable: true },
+    { field: 'county', header: 'County', sortable: true },
+    { field: 'state', header: 'State', sortable: true }
+  ];
+
+  // Fetch Wells
+  useEffect(() => {
+    const fetchWells = async () => {
+      if (!data.operator_id) return;
+      
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await wellService.getWellsByOperator(data.operator_id);
+        setWells(Array.isArray(response) ? response : []);
+      } catch (error) {
+        console.error('Error fetching wells:', error);
+        setError('Failed to load wells');
+        toast.error('Failed to load wells list');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchWells();
+  }, [data.operator_id]);
+
+  // Handler for updating form data
+  const handleDataUpdate = (updates) => {
+    if (!onChange) {
+      console.warn('onChange function not provided to WellInfoTab');
+      return;
+    }
+
+    try {
+      const updatedData = {
+        ...data,
+        ...updates
+      };
+      console.log('Updating well data:', updatedData);
+      onChange(updatedData);
+    } catch (err) {
+      console.error('Error updating data:', err);
+      toast.error('Failed to update well information');
+    }
+  };
+
+  // Handlers
+  const handleWellSelect = (well) => {
+    if (!well) return;
+    
+    console.log('Selected well:', well);
+    handleDataUpdate({
+      well_id: well.id,
+      well_name: well.well_name,
+      field_name: well.field_name,
+      api_number: well.api_number,
+      location: well.location,
+      county: well.county,
+      state: well.state
+    });
+    
+    toast.success(`Selected well: ${well.well_name}`);
+  };
+
+  const handleWellAdded = (newWell) => {
+    setWells(prev => [...prev, newWell]);
+    handleWellSelect(newWell);
+    setShowWellModal(false);
+    toast.success('Well added successfully');
+  };
+
+  const handleDepthChange = (field, value) => {
+    handleDataUpdate({ [field]: value });
+  };
+
+  return (
+    <div>
+      <Card className="mb-4">
+        <Card.Body>
+          <Row>
+            <Col md={6}>
+              <Form.Group>
+                <Form.Label>Selected Well <span className="text-danger">*</span></Form.Label>
+                <div className="d-flex gap-2">
+                  <Form.Control
+                    type="text"
+                    value={wells.find(w => w.id === data.well_id)?.well_name || ''}
+                    readOnly
+                    placeholder="Select a well from the table below"
+                    isInvalid={!!errors.well_id}
+                  />
+                  <Button
+                    variant="outline-primary"
+                    onClick={() => {
+                      setSelectedWell(null);
+                      setShowWellModal(true);
+                    }}
+                    disabled={!data.operator_id}
+                  >
+                    Add New
+                  </Button>
+                </div>
+                <Form.Control.Feedback type="invalid">
+                  {errors.well_id}
+                </Form.Control.Feedback>
+                {!data.operator_id && (
+                  <Form.Text className="text-muted">
+                    Please select an operator first
+                  </Form.Text>
+                )}
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group>
+                <Form.Label>Field Name</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={data.field_name || ''}
+                  readOnly
+                  isInvalid={!!errors.field_name}
+                />
+                <Form.Control.Feedback type="invalid">
+                  {errors.field_name}
+                </Form.Control.Feedback>
+              </Form.Group>
+            </Col>
+          </Row>
+          <Row className="mt-3">
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>Measured Depth (ft)</Form.Label>
+                <Form.Control
+                  type="number"
+                  step="0.01"
+                  value={data.measured_depth || ''}
+                  onChange={(e) => handleDepthChange('measured_depth', e.target.value)}
+                  placeholder="Enter measured depth"
+                  isInvalid={!!errors.measured_depth}
+                />
+                <Form.Control.Feedback type="invalid">
+                  {errors.measured_depth}
+                </Form.Control.Feedback>
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>Total Vertical Depth (ft)</Form.Label>
+                <Form.Control
+                  type="number"
+                  step="0.01"
+                  value={data.total_vertical_depth || ''}
+                  onChange={(e) => handleDepthChange('total_vertical_depth', e.target.value)}
+                  placeholder="Enter total vertical depth"
+                  isInvalid={!!errors.total_vertical_depth}
+                />
+                <Form.Control.Feedback type="invalid">
+                  {errors.total_vertical_depth}
+                </Form.Control.Feedback>
+              </Form.Group>
+            </Col>
+          </Row>
+        </Card.Body>
+      </Card>
+
+      <DataTable
+        columns={columns}
+        data={wells}
+        loading={loading}
+        onRowClick={handleWellSelect}
+        selectedId={data.well_id}
+      />
+
+      <WellDetailModal
+        show={showWellModal}
+        onHide={() => setShowWellModal(false)}
+        operatorId={data.operator_id}
+        well={selectedWell}
+        onWellAdded={handleWellAdded}
+      />
+    </div>
+  );
+};
+
+export default WellInfoTab;
+/src/components/common/DataTable.jsx
+
+// frontend\src\components\common\DataTable.jsx
+import React from 'react';
+import { Table, Pagination } from 'react-bootstrap';
+import { FaSort, FaSortUp, FaSortDown } from 'react-icons/fa';
+import LoadingSpinner from './LoadingSpinner';
+
+export const DataTable = ({ 
+  columns, 
+  data, 
+  loading,
+  onRowClick,
+  className = '',
+  sortField,
+  sortDirection,
+  onSort,
+  pagination,
+  onPageChange
+}) => {
+  const renderSortIcon = (field) => {
+    if (!onSort) return null;
+    if (field !== sortField) return <FaSort className="text-muted ms-2" />;
+    return sortDirection === 'asc' ? 
+      <FaSortUp className="text-primary ms-2" /> : 
+      <FaSortDown className="text-primary ms-2" />;
+  };
+
+  const renderPagination = () => {
+    if (!pagination || !onPageChange) return null;
+    
+    const { currentPage, totalPages } = pagination;
+    return (
+      <div className="d-flex justify-content-between align-items-center mt-3">
+        <div>
+          Showing {Math.min((currentPage - 1) * pagination.pageSize + 1, pagination.totalItems)} to {Math.min(currentPage * pagination.pageSize, pagination.totalItems)} of {pagination.totalItems} entries
+        </div>
+        <Pagination>
+          <Pagination.First 
+            disabled={currentPage === 1}
+            onClick={() => onPageChange(1)}
+          />
+          <Pagination.Prev 
+            disabled={currentPage === 1}
+            onClick={() => onPageChange(currentPage - 1)}
+          />
+          
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(page => {
+              if (totalPages <= 5) return true;
+              if (page === 1 || page === totalPages) return true;
+              return Math.abs(page - currentPage) <= 1;
+            })
+            .map((page, index, array) => {
+              if (index > 0 && array[index - 1] !== page - 1) {
+                return [
+                  <Pagination.Ellipsis key={`ellipsis-${page}`} />,
+                  <Pagination.Item
+                    key={page}
+                    active={page === currentPage}
+                    onClick={() => onPageChange(page)}
+                  >
+                    {page}
+                  </Pagination.Item>
+                ];
+              }
+              return (
+                <Pagination.Item
+                  key={page}
+                  active={page === currentPage}
+                  onClick={() => onPageChange(page)}
+                >
+                  {page}
+                </Pagination.Item>
+              );
+            })}
+          
+          <Pagination.Next 
+            disabled={currentPage === totalPages}
+            onClick={() => onPageChange(currentPage + 1)}
+          />
+          <Pagination.Last 
+            disabled={currentPage === totalPages}
+            onClick={() => onPageChange(totalPages)}
+          />
+        </Pagination>
+      </div>
+    );
+  };
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  return (
+    <div className={className}>
+      <Table hover responsive className="data-grid mb-0">
+        <thead>
+          <tr>
+            {columns.map((column, index) => (
+              <th 
+                key={index}
+                onClick={() => column.sortable && onSort?.(column.field)}
+                style={column.sortable ? { cursor: 'pointer' } : undefined}
+              >
+                <div className="d-flex align-items-center">
+                  {column.header}
+                  {column.sortable && renderSortIcon(column.field)}
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row, rowIndex) => (
+            <tr 
+              key={rowIndex}
+              onClick={() => onRowClick?.(row)}
+              style={onRowClick ? { cursor: 'pointer' } : undefined}
+            >
+              {columns.map((column, colIndex) => (
+                <td key={colIndex}>
+                  {column.render ? column.render(row) : row[column.field]}
+                </td>
+              ))}
+            </tr>
+          ))}
+          {data.length === 0 && (
+            <tr>
+              <td colSpan={columns.length} className="text-center py-4">
+                No data available
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </Table>
+      {renderPagination()}
+    </div>
+  );
+};
+
+export default DataTable;
+/src/components/wells/WellDetailModal.jsx
+
+// File: /src/components/wells/WellDetailModal.jsx
+import React, { useState, useEffect } from 'react';
+import { Modal, Button, Form, Row, Col } from 'react-bootstrap';
+import { toast } from 'react-toastify';
+import wellService from '../../services/wellService';
+
+const WellDetailModal = ({ show, onHide, operatorId, well = null, onWellAdded, onWellUpdated }) => {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    well_name: '',
+    api_number: '',
+    field_name: '',
+    location: '',
+    county: '',
+    state: '',
+    country: '',
+    operator_id: operatorId
+  });
+
+  useEffect(() => {
+    if (well) {
+      setFormData({
+        well_name: well.well_name || '',
+        api_number: well.api_number || '',
+        field_name: well.field_name || '',
+        location: well.location || '',
+        county: well.county || '',
+        state: well.state || '',
+        country: well.country || '',
+        operator_id: operatorId
+      });
+    } else {
+      setFormData({
+        well_name: '',
+        api_number: '',
+        field_name: '',
+        location: '',
+        county: '',
+        state: '',
+        country: '',
+        operator_id: operatorId
+      });
+    }
+  }, [well, operatorId]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      const response = await wellService.createWell(formData);
+      toast.success('Well added successfully');
+      onWellAdded(response);
+      onHide();
+    } catch (error) {
+      console.error('Error saving well:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal show={show} onHide={onHide} size="lg">
+      <Modal.Header closeButton>
+        <Modal.Title>{well ? 'Edit Well' : 'Add New Well'}</Modal.Title>
+      </Modal.Header>
+      <Form onSubmit={handleSubmit}>
+        <Modal.Body>
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>Well Name <span className="text-danger">*</span></Form.Label>
+                <Form.Control
+                  type="text"
+                  name="well_name"
+                  value={formData.well_name}
+                  onChange={(e) => setFormData({ ...formData, well_name: e.target.value })}
+                  required
+                />
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>API Number</Form.Label>
+                <Form.Control
+                  type="text"
+                  name="api_number"
+                  value={formData.api_number}
+                  onChange={(e) => setFormData({ ...formData, api_number: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+          </Row>
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>Field Name</Form.Label>
+                <Form.Control
+                  type="text"
+                  name="field_name"
+                  value={formData.field_name}
+                  onChange={(e) => setFormData({ ...formData, field_name: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>Location</Form.Label>
+                <Form.Control
+                  type="text"
+                  name="location"
+                  value={formData.location}
+                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+          </Row>
+          <Row>
+            <Col md={4}>
+              <Form.Group className="mb-3">
+                <Form.Label>County</Form.Label>
+                <Form.Control
+                  type="text"
+                  name="county"
+                  value={formData.county}
+                  onChange={(e) => setFormData({ ...formData, county: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={4}>
+              <Form.Group className="mb-3">
+                <Form.Label>State</Form.Label>
+                <Form.Control
+                  type="text"
+                  name="state"
+                  value={formData.state}
+                  onChange={(e) => setFormData({ ...formData, state: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={4}>
+              <Form.Group className="mb-3">
+                <Form.Label>Country</Form.Label>
+                <Form.Control
+                  type="text"
+                  name="country"
+                  value={formData.country}
+                  onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+          </Row>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={onHide}>
+            Cancel
+          </Button>
+          <Button variant="primary" type="submit" disabled={loading}>
+            {loading ? 'Saving...' : 'Save Well'}
+          </Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  );
+};
+
+export default WellDetailModal;
+
+2. Related Services:
+
+```plaintext
+
+/src/services/wellService.js
+// File: /src/services/wellService.js
+import apiRequest, { API_ENDPOINTS, handleApiError } from './api';
+
+const wellService = {
+  getWellsByOperator: async (operatorId) => {
+    try {
+      const response = await apiRequest.get(API_ENDPOINTS.wells.getByOperator(operatorId));
+      return response;
+    } catch (error) {
+      handleApiError(error, 'Error fetching wells');
+      return [];
+    }
+  },
+
+  createWell: async (wellData) => {
+    try {
+      const response = await apiRequest.post(API_ENDPOINTS.wells.create, wellData);
+      return response;
+    } catch (error) {
+      handleApiError(error, 'Error creating well');
+      throw error;
+    }
+  }
+};
+
+export default wellService;
+
+/src/services/api.js
+
+// File: /src/services/api.js
+import axios from 'axios';
+import store from '../store';
+import { logout } from '../store/slices/authSlice';
+import { toast } from 'react-toastify';
+
+// API Endpoints configuration
+const API_ENDPOINTS = {
+  auth: {
+    login: '/token',
+    refresh: '/token/refresh',
+    logout: '/auth/logout'
+  },
+  fluids: {
+    base: '/fluids',
+    getByWellbore: (wellboreId) => `/fluids/wellbore/${wellboreId}`,
+    getByType: (wellboreId, type) => `/fluids/wellbore/${wellboreId}/type/${type}`,
+    update: (id) => `/fluids/${id}`
+  },
+  jobs: {
+    base: '/jobs',
+    getAll: '/jobs',
+    getById: (id) => `/jobs/${id}`,
+    create: '/jobs',
+    update: (id) => `/jobs/${id}`,
+    delete: (id) => `/jobs/${id}`,
+    active: '/jobs/active',
+    export: '/jobs/export'
+  },
+  operators: {
+    base: '/operators',
+    getAll: '/operators',
+    getByName: (name) => `/operators/name/${name}`,
+    getByCode: (code) => `/operators/code/${code}`,
+    create: '/operators'
+  },
+  jobCenters: {
+    base: '/job-centers',
+    getAll: '/job-centers',
+    getActive: '/job-centers/active',
+    getByWell: (wellName) => `/job-centers/well/${wellName}`,
+    getByShortName: (shortName) => `/job-centers/short/${shortName}`
+  },
+  wells: {
+    base: '/wells',
+    getAll: '/wells',
+    getByOperator: (operatorId) => `/wells/operator/${operatorId}`,
+    create: '/wells'
+  },
+  rigs: {
+    base: '/rigs',
+    getAll: '/rigs',
+    getActive: '/rigs/active'
+  },
+  purchaseOrders: {
+    base: '/purchase-orders',
+    getAll: '/purchase-orders',
+    getById: (id) => `/purchase-orders/${id}`,
+    createPurchaseOrder: '/purchase-orders',
+  }
+};
+
+// Create axios instance with default config
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1',
+  timeout: 10000,
+  headers: {
+    'Accept': 'application/json'
+  },
+  withCredentials: true
+});
+
+// Request interceptor
+api.interceptors.request.use(
+  (config) => {
+    // Add CORS headers
+    config.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000';
+    config.headers['Access-Control-Allow-Credentials'] = 'true';
+
+    // Add auth token
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    // Set Content-Type based on data type
+    if (config.data instanceof URLSearchParams) {
+      config.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    } else if (typeof config.data === 'object') {
+      config.headers['Content-Type'] = 'application/json';
+    }
+
+    // Clean up URL if it includes baseURL
+    if (config.url.startsWith('/api/v1')) {
+      config.url = config.url.substring(7);
+    }
+
+    return config;
+  },
+  (error) => {
+    console.error('Request Error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor
+api.interceptors.response.use(
+  (response) => {
+    // Ensure we always have response.data
+    if (!response.data) {
+      console.warn('Empty response data received');
+      return {};
+    }
+    return response.data;
+  },
+  async (error) => {
+    const originalRequest = error.config;
+
+    // Handle token expiration
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      try {
+        const refreshToken = localStorage.getItem('refreshToken');
+        if (!refreshToken) {
+          throw new Error('No refresh token available');
+        }
+
+        const response = await axios.post(
+          `${api.defaults.baseURL}${API_ENDPOINTS.auth.refresh}`,
+          { refresh_token: refreshToken }
+        );
+
+        const { access_token } = response.data;
+
+        if (access_token) {
+          localStorage.setItem('token', access_token);
+          api.defaults.headers.Authorization = `Bearer ${access_token}`;
+          originalRequest.headers.Authorization = `Bearer ${access_token}`;
+
+          return api(originalRequest);
+        }
+      } catch (refreshError) {
+        store.dispatch(logout());
+        toast.error('Session expired. Please login again.');
+        return Promise.reject(refreshError);
+      }
+    }
+
+    // Handle other errors
+    if (error.response) {
+      const message = error.response.data?.detail || 
+                     error.response.data?.message || 
+                     'An error occurred';
+      toast.error(message);
+    } else if (error.request) {
+      toast.error('Network error. Please check your connection.');
+    } else {
+      toast.error('An unexpected error occurred.');
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+// Error handling utility
+const handleApiError = (error, customMessage = '') => {
+  console.error('API Error:', error);
+
+  const errorMessage = error.response?.data?.detail || 
+                      error.response?.data?.message ||
+                      customMessage ||
+                      'An unexpected error occurred';
+
+  toast.error(errorMessage);
+  return Promise.reject(new Error(errorMessage));
+};
+
+// Single export statement for all exports
+export { api as default, handleApiError, API_ENDPOINTS };
+
+3. Parent Components:
+
+```plaintext
+
+/src/pages/job/CreateJobPage.jsx
+// File: /src/pages/job/CreateJobPage.jsx
+import React, { useState, useCallback } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
+import { Card, Alert, Row, Col, Nav, Tab, Button } from 'react-bootstrap';
+import { 
+  createJob, 
+  selectJobsLoading, 
+  selectJobsError,
+  fetchRelatedData
+} from '../../store/slices/jobsSlice';
+import NavigationButtons from '../../components/common/NavigationButtons';
+import CustomerInfoTab from "../../components/jobs/CreateJob/tabs/CustomerInfoTab";
+import WellInfoTab from '../../components/jobs/CreateJob/tabs/WellInfoTab';
+import RigInfoTab from '../../components/jobs/CreateJob/tabs/RigInfoTab';
+import WellboreGeometryTab from '../../components/jobs/CreateJob/tabs/WellboreGeometryTab';
+import TrajectoryTab from '../../components/jobs/CreateJob/tabs/TrajectoryTab';
+import FluidsTab from '../../components/jobs/CreateJob/tabs/FluidsTab';
+import { toast } from 'react-toastify';
+
+const INITIAL_FORM_DATA = {
+  operator_id: '',
+  job_name: '',
+  job_center_id: '',
+  job_description: '',
+  service_code: '',
+  country: '',
+  purchase_order_id: '',
+  well_id: '',
+  field_name: '',
+  well_type: '',
+  well_status: '',
+  rig_id: '',
+  rig_type: '',
+  rig_capability: '',
+  rig_status: '',
+};
+
+const TABS = [
+  {
+    id: 'customer-info',
+    title: 'Customer Information',
+    component: CustomerInfoTab,
+    requiredFields: ['operator_id', 'job_name', 'job_description', 'job_center_id']
+  },
+  {
+    id: 'well-info',
+    title: 'Well Information',
+    component: WellInfoTab,
+    requiredFields: ['well_id', 'field_name', 'well_type']
+  },
+  {
+    id: 'rig-info',
+    title: 'Rig Information',
+    component: RigInfoTab,
+    requiredFields: ['rig_id', 'rig_type']
+  },
+  {
+    id: 'wellbore-geometry',
+    title: 'Wellbore Geometry',
+    component: WellboreGeometryTab,
+    requiredFields: ['wellbore_type', 'total_depth']
+  },
+  {
+    id: 'trajectory',
+    title: 'Trajectory',
+    component: TrajectoryTab,
+    requiredFields: ['trajectory_type']
+  },
+  {
+    id: 'fluids',
+    title: 'Fluids',
+    component: FluidsTab,
+    requiredFields: ['primary_fluid_type']
+  }
+];
+
+const CreateJobPage = () => {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState(TABS[0].id);
+  const [formData, setFormData] = useState(INITIAL_FORM_DATA);
+  const [formErrors, setFormErrors] = useState({});
+  const [error, setError] = useState(null);
+
+  const isLoading = useSelector(selectJobsLoading);
+  const apiError = useSelector(selectJobsError);
+
+  // Check if current tab is valid
+  const isTabValid = useCallback((tabId) => {
+    const tab = TABS.find(t => t.id === tabId);
+    if (!tab) return true;
+
+    return tab.requiredFields.every(field => {
+      const value = formData[field];
+      return value !== undefined && value !== null && value !== '';
+    });
+  }, [formData]);
+
+  // Handle form data changes
+  const handleFormChange = useCallback((data) => {
+    console.log('Form data being updated:', data);
+    setFormData(prevData => {
+      const newData = {
+        ...prevData,
+        ...data
+      };
+      console.log('Updated form data:', newData);
+      return newData;
+    });
+    setFormErrors({});
+  }, []);
+
+  // Handle tab change
+  const handleTabChange = useCallback((tabId) => {
+    const currentTabValid = isTabValid(activeTab);
+    if (!currentTabValid) {
+      const tab = TABS.find(t => t.id === activeTab);
+      const missingFields = tab.requiredFields.filter(field => !formData[field]);
+      setError(`Please complete these required fields: ${missingFields.join(', ')}`);
+      return;
+    }
+    setActiveTab(tabId);
+    setError(null);
+  }, [activeTab, formData, isTabValid]);
+
+  // Navigation handlers
+  const handlePrevious = useCallback(() => {
+    const currentIndex = TABS.findIndex(tab => tab.id === activeTab);
+    if (currentIndex > 0) {
+      setActiveTab(TABS[currentIndex - 1].id);
+      setError(null);
+    }
+  }, [activeTab]);
+
+  const handleNext = useCallback(() => {
+    const currentIndex = TABS.findIndex(tab => tab.id === activeTab);
+    const currentTabValid = isTabValid(activeTab);
+    
+    if (currentTabValid && currentIndex < TABS.length - 1) {
+      setActiveTab(TABS[currentIndex + 1].id);
+      setError(null);
+    } else if (!currentTabValid) {
+      const tab = TABS[currentIndex];
+      const missingFields = tab.requiredFields.filter(field => !formData[field]);
+      setError(`Please complete these required fields: ${missingFields.join(', ')}`);
+    }
+  }, [activeTab, formData, isTabValid]);
+
+  // Save handler
+  const handleSave = useCallback(async () => {
+    const invalidTabs = TABS.filter(tab => !isTabValid(tab.id));
+    if (invalidTabs.length > 0) {
+      const missingFieldsList = invalidTabs
+        .map(tab => `${tab.title}: ${tab.requiredFields.filter(field => !formData[field]).join(', ')}`)
+        .join('\n');
+      setError(`Please complete all required fields:\n${missingFieldsList}`);
+      return;
+    }
+
+    try {
+      const result = await dispatch(createJob(formData)).unwrap();
+      toast.success('Job created successfully');
+      navigate(`/jobs/${result.id}`);
+    } catch (err) {
+      setError(err.message || 'Failed to create job');
+      toast.error(err.message || 'Failed to create job');
+    }
+  }, [dispatch, formData, isTabValid, navigate]);
+
+  return (
+    <div className="p-4">
+      <Card>
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <h4 className="mb-0">Create New Job</h4>
+          <Button variant="outline-primary" onClick={() => navigate('/jobs')}>
+            Back to Jobs
+          </Button>
+        </Card.Header>
+        <Card.Body>
+          {(error || apiError) && (
+            <Alert variant="danger" onClose={() => setError(null)} dismissible>
+              {error || apiError}
+            </Alert>
+          )}
+
+          <Tab.Container activeKey={activeTab}>
+            <Row>
+              <Col md={3}>
+                <Nav variant="pills" className="flex-column">
+                  {TABS.map((tab) => (
+                    <Nav.Item key={tab.id}>
+                      <Nav.Link
+                        eventKey={tab.id}
+                        onClick={() => handleTabChange(tab.id)}
+                        className="d-flex align-items-center"
+                      >
+                        {tab.title}
+                        {isTabValid(tab.id) && (
+                          <i className="bi bi-check-circle-fill text-success ms-2"></i>
+                        )}
+                      </Nav.Link>
+                    </Nav.Item>
+                  ))}
+                </Nav>
+              </Col>
+              <Col md={9}>
+                <Tab.Content>
+                  <Tab.Pane eventKey={activeTab}>
+                    {React.createElement(TABS.find(tab => tab.id === activeTab)?.component, {
+                      data: formData,
+                      onChange: handleFormChange,
+                      errors: formErrors
+                    })}
+                  </Tab.Pane>
+                </Tab.Content>
+
+                <div className="mt-4 border-top pt-3">
+                  <NavigationButtons
+                    onPrevious={handlePrevious}
+                    onNext={handleNext}
+                    onSave={handleSave}
+                    canGoNext={isTabValid(activeTab)}
+                    canGoPrevious={TABS.findIndex(tab => tab.id === activeTab) > 0}
+                    canSave={TABS.every(tab => isTabValid(tab.id))}
+                    isLastStep={activeTab === TABS[TABS.length - 1].id}
+                    isLoading={isLoading}
+                  />
+                </div>
+              </Col>
+            </Row>
+          </Tab.Container>
+        </Card.Body>
+      </Card>
+    </div>
+  );
+};
+
+export default CreateJobPage;

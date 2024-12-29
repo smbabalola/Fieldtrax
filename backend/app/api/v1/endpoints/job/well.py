@@ -141,6 +141,28 @@ async def update_well(
             detail=str(e)
         )
 
+@router.get("/operator/{operator_id}", response_model=List[WellResponse])
+async def get_wells_by_operator(
+    operator_id: str, # Or int, depending on your operator_id type
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user), # Optional authentication
+):
+    """
+    Retrieve wells associated with a specific operator.
+    """
+    try:
+        #Attempt to convert the operator_id to an integer
+        pass
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid operator ID. Must be an integer.")
+
+    wells = await crud_well.get_wells_by_operator_id(db=db, operator_id=operator_id)
+
+    if not wells:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No wells found for operator ID: {operator_id}")
+
+    return wells
+
 @router.delete("/{well_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_well(
     *,

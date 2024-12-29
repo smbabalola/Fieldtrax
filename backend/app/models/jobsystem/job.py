@@ -9,10 +9,12 @@ class Job(BaseDBModel):
 
     jobcenter_id = Column(String(50), ForeignKey('job_centers.id'), nullable=False)
     job_name = Column(String(50), nullable=False)
-    job_description = Column(String(100), nullable=True)
+    job_description = Column(String(255), nullable=True)
+    #Rig information
     rig_id = Column(String(50), ForeignKey('rigs.id'), nullable=False)
     purchase_order_id = Column(String(50), ForeignKey('purchase_orders.id'), nullable=False)
     operator_id = Column(String(50), ForeignKey('operators.id'), nullable=False)
+    #Well information
     well_id = Column(String(50), ForeignKey('wells.id'), nullable=False)
     service_code = Column(NCHAR(4), nullable=True)
     country = Column(String(50), nullable=False)
@@ -33,6 +35,7 @@ class Job(BaseDBModel):
     rig = relationship('Rig', back_populates='jobs') 
     operator = relationship('Operator', back_populates='jobs') 
     purchase_order = relationship('PurchaseOrder', back_populates='jobs') 
+    activities = relationship('Activity', back_populates='job')
 
     def __repr__(self):
         return f"<Job: {self.well_name}>"

@@ -29,9 +29,21 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
             db.refresh(job)
         return job
 
+    async def get_multi(self, db: Session, skip: int = 0, limit: int = 100, filters: Dict[str, Any] = None) -> List[Job]:
+        query = db.query(Job)
+        
+        if filters:
+            if filters.get("status") and filters["status"] != "ALL":
+                query = query.filter(Job.status == filters["status"])
+            if filters.get("search_term"):
+                search_term = f"%{filters['search_term']}%"
+                query = query.filter(Job.description.ilike(search_term) | Job.job_number.ilike(search_term) | Job.notes.ilike(search_term))
+            if filters.get("sort_field") and filters.get("sort_order"):
+                sort_field = getattr(Job, filters["sort_field"])
+                if filters["sort_order"] == "desc":
+                    sort_field = sort_field.desc()
+                query = query.order_by(sort_field)
+        
+        return query.offset(skip).limit(limit).all()
+
 crud_job = CRUDJob(Job)
-
-# from app.models.jobsystem.job import Job
-# from app.crud.base import CRUDBase
-
-# crud_job = CRUDBase(Job)

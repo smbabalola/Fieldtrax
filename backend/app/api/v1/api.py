@@ -13,7 +13,8 @@ from app.api.v1.endpoints.job import (
     physical_barrier, production, mud_equipment_detail,
     mud_pump_detail, trajectory, time_sheet, tally, tally_item,
     slot, seal_assembly, job_parameter, tubular, tubular_type, 
-    well,well_shape, well_type, installation_type, settings
+    well,well_shape, well_type, installation_type, settings,
+    activity
 )
 
 # Import Rig System Routers
@@ -65,6 +66,7 @@ api_router.include_router(well_shape.router, prefix="/well-shapes", tags=["well-
 api_router.include_router(well_type.router, prefix="/well-types", tags=["well-types"])
 api_router.include_router(installation_type.router, prefix="/installation-types", tags=["installation-types"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
+api_router.include_router(activity.router, prefix="/activities", tags=["activities"])
 
 # Include Rig System Routers
 api_router.include_router(rig.router, prefix="/rigs", tags=["rigs"])

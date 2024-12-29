@@ -91,5 +91,13 @@ class CRUDWell(CRUDBase[Well, WellCreate, WellUpdate]):
         except Exception as e:
             logger.error(f"Unexpected error in get_by_name: {str(e)}", exc_info=True)
             raise
+        
+    async def get_wells_by_operator_id(
+        self, 
+        db: Session, 
+        *, 
+        operator_id: int
+        ) -> List[Well]:
+        return db.query(Well).filter(Well.operator_id == operator_id).all()
 
 crud_well = CRUDWell(Well)

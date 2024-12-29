@@ -1,0 +1,2109 @@
+# File: backend/app/crud/authsystem/password_reset.py
+from typing import Optional
+from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.authsystem.password_reset import PasswordReset
+from app.schemas.authsystem.password_reset import PasswordResetCreate, PasswordResetUpdate
+from app.core.security import generate_reset_token
+
+class CRUDPasswordReset(CRUDBase[PasswordReset, PasswordResetCreate, PasswordResetUpdate]):
+    async def create_reset_token(self, db: Session, *, user_id: str) -> PasswordReset:
+        """Create new password reset token"""
+        # Delete any existing unused tokens
+        db.query(PasswordReset).filter(
+            PasswordReset.user_id == user_id,
+            PasswordReset.is_used == False
+        ).delete()
+        
+        # Create new token
+        token = generate_reset_token()
+        db_obj = PasswordReset(
+            user_id=user_id,
+            token=token,
+            expires_at=datetime.utcnow() + timedelta(hours=24),
+            is_used=False
+        )
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    async def get_valid_token(self, db: Session, *, token: str) -> Optional[PasswordReset]:
+        """Get valid (unused and not expired) token"""
+        return db.query(PasswordReset).filter(
+            PasswordReset.token == token,
+            PasswordReset.is_used == False,
+            PasswordReset.expires_at > datetime.utcnow()
+        ).first()
+
+    async def mark_used(self, db: Session, *, db_obj: PasswordReset) -> PasswordReset:
+        """Mark token as used"""
+        db_obj.is_used = True
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+crud_password_reset = CRUDPasswordReset(PasswordReset)
+
+# File: backend/app/crud/authsystem/user_session.py
+from typing import Optional, List
+from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.authsystem.user_session import UserSession
+from app.schemas.authsystem.user_session import UserSessionCreate, UserSessionUpdate
+
+class CRUDUserSession(CRUDBase[UserSession, UserSessionCreate, UserSessionUpdate]):
+    async def create_session(
+        self, 
+        db: Session, 
+        *, 
+        user_id: str, 
+        access_token: str,
+        refresh_token: Optional[str] = None,
+        device_info: Optional[str] = None,
+        ip_address: Optional[str] = None
+    ) -> UserSession:
+        """Create new user session"""
+        db_obj = UserSession(
+            user_id=user_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            device_info=device_info,
+            ip_address=ip_address,
+            expires_at=datetime.utcnow() + timedelta(days=7),
+            is_active=True
+        )
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    async def get_active_sessions(self, db: Session, *, user_id: str) -> List[UserSession]:
+        """Get all active sessions for user"""
+        return db.query(UserSession).filter(
+            UserSession.user_id == user_id,
+            UserSession.is_active == True,
+            UserSession.expires_at > datetime.utcnow()
+        ).all()
+
+    async def deactivate_session(self, db: Session, *, session_id: str) -> Optional[UserSession]:
+        """Deactivate a session"""
+        session = await self.get(db=db, id=session_id)
+        if session:
+            session.is_active = False
+            session.updated_at = datetime.utcnow()
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+        return session
+
+    async def deactivate_all_sessions(self, db: Session, *, user_id: str) -> None:
+        """Deactivate all sessions for user"""
+        db.query(UserSession).filter(
+            UserSession.user_id == user_id,
+            UserSession.is_active == True
+        ).update({
+            UserSession.is_active: False,
+            UserSession.updated_at: datetime.utcnow()
+        })
+        db.commit()
+
+    async def update_last_activity(
+        self, 
+        db: Session, 
+        *, 
+        session_id: str
+    ) -> Optional[UserSession]:
+        """Update last activity timestamp"""
+        session = await self.get(db=db, id=session_id)
+        if session:
+            session.last_activity = datetime.utcnow()
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+        return session
+    
+crud_user_session = CRUDUserSession(UserSession)
+
+# File: backend/app/crud/authsystem/user.py
+from typing import Optional, List, Union, Dict, Any
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.authsystem.user import User
+from app.schemas.authsystem.user import UserCreate, UserUpdate
+from app.core.security import get_password_hash, verify_password
+
+class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
+    async def get_by_email(self, db: Session, *, email: str) -> Optional[User]:
+        """Get user by email"""
+        return db.query(User).filter(User.email == email).first()
+
+    async def get_by_username(self, db: Session, *, username: str) -> Optional[User]:
+        """Get user by username"""
+        return db.query(User).filter(User.username == username).first()
+
+    async def create(self, db: Session, *, obj_in: UserCreate) -> User:
+        """Create new user with hashed password"""
+        db_obj = User(
+            email=obj_in.email,
+            username=obj_in.username,
+            password=get_password_hash(obj_in.password),
+            full_name=obj_in.full_name,
+            is_active=True,
+            is_verified=False
+        )
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    async def update(
+        self, db: Session, *, db_obj: User, obj_in: Union[UserUpdate, Dict[str, Any]]
+    ) -> User:
+        """Update user"""
+        if isinstance(obj_in, dict):
+            update_data = obj_in
+        else:
+            update_data = obj_in.dict(exclude_unset=True)
+        
+        if "password" in update_data:
+            hashed_password = get_password_hash(update_data["password"])
+            del update_data["password"]
+            update_data["password"] = hashed_password
+            
+        return await super().update(db, db_obj=db_obj, obj_in=update_data)
+
+    async def authenticate(self, db: Session, *, email: str, password: str) -> Optional[User]:
+        """Authenticate user"""
+        user = await self.get_by_email(db, email=email)
+        if not user:
+            return None
+        if not verify_password(password, user.password):
+            return None
+        return user
+
+    async def is_active(self, user: User) -> bool:
+        """Check if user is active"""
+        return user.is_active
+
+    async def is_verified(self, user: User) -> bool:
+        """Check if user is verified"""
+        return user.is_verified
+    
+crud_user = CRUDUser(User)
+
+# File: backend/app/crud/jobsystem/crud_daily_report.py
+from typing import List, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.daily_report import DailyReport
+from app.schemas.jobsystem.daily_report import DailyReportCreate, DailyReportUpdate
+
+class CRUDDailyReport(CRUDBase[DailyReport, DailyReportCreate, DailyReportUpdate]):
+    async def get_by_wellbore(self, db: Session, *, wellbore_id: str) -> List[DailyReport]:
+        """Get all daily reports for a wellbore"""
+        return db.query(DailyReport).filter(
+            DailyReport.wellbore_id == wellbore_id
+        ).order_by(DailyReport.report_date.desc()).all()
+
+    async def get_by_date_range(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str,
+        start_date: datetime,
+        end_date: datetime
+    ) -> List[DailyReport]:
+        """Get daily reports within a date range"""
+        return db.query(DailyReport).filter(
+            DailyReport.wellbore_id == wellbore_id,
+            DailyReport.report_date >= start_date,
+            DailyReport.report_date <= end_date
+        ).order_by(DailyReport.report_date.desc()).all()
+        
+crud_daily_report = CRUDDailyReport(DailyReport)
+
+# File: backend/app/crud/jobsystem/crud_field.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.field import Field
+from app.schemas.jobsystem.field import FieldCreate, FieldUpdate
+
+class CRUDField(CRUDBase[Field, FieldCreate, FieldUpdate]):
+    async def get_by_name(self, db: Session, *, field_name: str) -> Optional[Field]:
+        """Get field by name"""
+        return db.query(Field).filter(Field.field_name == field_name).first()
+
+    async def get_fields_by_country(self, db: Session, *, country: str) -> List[Field]:
+        """Get all fields in a country"""
+        return db.query(Field).filter(Field.country == country).all()
+
+    async def get_fields_by_area(self, db: Session, *, area: str) -> List[Field]:
+        """Get all fields in an area"""
+        return db.query(Field).filter(Field.area == area).all()
+
+crud_field = CRUDField(Field)
+# File: backend/app/crud/jobsystem/crud_fluid.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.fluid import Fluid
+from app.schemas.jobsystem.fluid import FluidCreate, FluidUpdate
+
+class CRUDFluid(CRUDBase[Fluid, FluidCreate, FluidUpdate]):
+    async def get_by_wellbore(self, db: Session, *, wellbore_id: str) -> List[Fluid]:
+        """Get all fluids for a wellbore"""
+        return db.query(Fluid).filter(Fluid.wellbore_id == wellbore_id).all()
+
+    async def get_by_type(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str,
+        fluid_type: str
+    ) -> List[Fluid]:
+        """Get all fluids of a specific type for a wellbore"""
+        return db.query(Fluid).filter(
+            Fluid.wellbore_id == wellbore_id,
+            Fluid.fluid_type == fluid_type
+        ).all()
+
+crud_fluid = CRUDFluid(Fluid)
+
+# File: backend/app/crud/jobsystem/crud_hanger_info.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.hanger_info import HangerInfo
+from app.schemas.jobsystem.hanger_info import HangerInfoCreate, HangerInfoUpdate
+
+class CRUDHangerInfo(CRUDBase[HangerInfo, HangerInfoCreate, HangerInfoUpdate]):
+    async def get_by_wellbore(self, db: Session, *, wellbore_id: str) -> List[HangerInfo]:
+        """Get all hanger info for a wellbore"""
+        return db.query(HangerInfo).filter(HangerInfo.wellbore_id == wellbore_id).all()
+
+    async def get_by_type(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str,
+        hanger_type: str
+    ) -> Optional[HangerInfo]:
+        """Get hanger info by type"""
+        return db.query(HangerInfo).filter(
+            HangerInfo.wellbore_id == wellbore_id,
+            HangerInfo.type == hanger_type
+        ).first()
+        
+crud_hanger_info = CRUDHangerInfo(HangerInfo)
+
+# File: backend/app/crud/jobsystem/crud_installation_type.py
+from typing import Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.installation_type import InstallationType
+from app.schemas.jobsystem.installation_type import (
+    InstallationTypeCreate, 
+    InstallationTypeUpdate
+)
+
+class CRUDInstallationType(CRUDBase[InstallationType, InstallationTypeCreate, InstallationTypeUpdate]):
+    async def get_by_type(
+        self, 
+        db: Session, 
+        *, 
+        installation_type: str
+    ) -> Optional[InstallationType]:
+        """Get installation type by name"""
+        return db.query(InstallationType).filter(
+            InstallationType.installation_type == installation_type
+        ).first()
+        
+crud_installation_type = CRUDInstallationType(InstallationType)
+
+# File: backend/app/crud/jobsystem/crud_installation.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.installation import Installation
+from app.schemas.jobsystem.installation import InstallationCreate, InstallationUpdate
+
+class CRUDInstallation(CRUDBase[Installation, InstallationCreate, InstallationUpdate]):
+    async def get_by_field(
+        self, 
+        db: Session, 
+        *, 
+        field_id: str
+    ) -> List[Installation]:
+        """Get all installations in a field"""
+        return db.query(Installation).filter(
+            Installation.field_id == field_id
+        ).all()
+
+    async def get_by_name(
+        self, 
+        db: Session, 
+        *, 
+        installation_name: str
+    ) -> Optional[Installation]:
+        """Get installation by name"""
+        return db.query(Installation).filter(
+            Installation.installation_name == installation_name
+        ).first()
+
+    async def get_by_type(
+        self, 
+        db: Session, 
+        *, 
+        installation_type_id: str
+    ) -> List[Installation]:
+        """Get installations by type"""
+        return db.query(Installation).filter(
+            Installation.installation_type_id == installation_type_id
+        ).all()
+
+crud_installation = CRUDInstallation(Installation)
+
+# File: backend/app/crud/jobsystem/crud_job_center.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.job_center import JobCenter
+from app.schemas.jobsystem.job_center import JobCenterCreate, JobCenterUpdate
+
+class CRUDJobCenter(CRUDBase[JobCenter, JobCenterCreate, JobCenterUpdate]):
+    async def get_by_well_name(
+        self, 
+        db: Session, 
+        *, 
+        well_name: str
+    ) -> Optional[JobCenter]:
+        """Get job center by well name"""
+        return db.query(JobCenter).filter(
+            JobCenter.well_name == well_name
+        ).first()
+
+    async def get_by_short_name(
+        self, 
+        db: Session, 
+        *, 
+        short_name: str
+    ) -> Optional[JobCenter]:
+        """Get job center by short name"""
+        return db.query(JobCenter).filter(
+            JobCenter.short_name == short_name
+        ).first()
+
+    async def get_active_job_centers(
+        self, 
+        db: Session
+    ) -> List[JobCenter]:
+        """Get all active job centers"""
+        return db.query(JobCenter).filter(
+            db.exists().where(
+                JobCenter.jobs.any(job_closed=False)
+            )
+        ).all()
+
+crud_job_center = CRUDJobCenter(JobCenter)
+# File: backend/app/crud/jobsystem/crud_job_center.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.job_center import JobCenter
+from app.schemas.jobsystem.job_center import JobCenterCreate, JobCenterUpdate
+
+class CRUDJobCenter(CRUDBase[JobCenter, JobCenterCreate, JobCenterUpdate]):
+    async def get_by_well_name(
+        self, 
+        db: Session, 
+        *, 
+        well_name: str
+    ) -> Optional[JobCenter]:
+        """Get job center by well name"""
+        return db.query(JobCenter).filter(
+            JobCenter.well_name == well_name
+        ).first()
+
+    async def get_by_short_name(
+        self, 
+        db: Session, 
+        *, 
+        short_name: str
+    ) -> Optional[JobCenter]:
+        """Get job center by short name"""
+        return db.query(JobCenter).filter(
+            JobCenter.short_name == short_name
+        ).first()
+
+    async def get_active_job_centers(
+        self, 
+        db: Session
+    ) -> List[JobCenter]:
+        """Get all active job centers"""
+        return db.query(JobCenter).filter(
+            db.exists().where(
+                JobCenter.jobs.any(job_closed=False)
+            )
+        ).all()
+
+crud_job_center = CRUDJobCenter(JobCenter)
+from typing import List, Optional, Union, Dict, Any
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.job import Job
+from app.schemas.jobsystem.job import JobCreate, JobUpdate
+
+class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
+    async def get_by_well(self, db: Session, *, well_id: str) -> List[Job]:
+        """Get all jobs for a specific well"""
+        return db.query(Job).filter(Job.well_id == well_id).all()
+    
+    async def get_active_jobs(self, db: Session) -> List[Job]:
+        """Get all active jobs"""
+        return db.query(Job).filter(Job.job_closed == False).all()
+    
+    async def get_jobs_by_operator(self, db: Session, *, operator_id: str) -> List[Job]:
+        """Get all jobs for a specific operator"""
+        return db.query(Job).filter(Job.operator_id == operator_id).all()
+
+    async def close_job(self, db: Session, *, job_id: str) -> Optional[Job]:
+        """Close a job"""
+        job = await self.get(db=db, id=job_id)
+        if job:
+            job.job_closed = True
+            job.updated_at = datetime.utcnow()
+            db.add(job)
+            db.commit()
+            db.refresh(job)
+        return job
+
+crud_job = CRUDJob(Job)
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.mud_equipment_detail import MudEquipmentDetail
+from app.schemas.jobsystem.mud_equipment_detail import (
+    MudEquipmentDetailCreate, 
+    MudEquipmentDetailUpdate
+)
+
+class CRUDMudEquipmentDetail(CRUDBase[MudEquipmentDetail, MudEquipmentDetailCreate, MudEquipmentDetailUpdate]):
+    async def get_by_report(
+        self, 
+        db: Session, 
+        *, 
+        report_id: str
+    ) -> List[MudEquipmentDetail]:
+        """Get all mud equipment details for a daily report"""
+        return db.query(MudEquipmentDetail).filter(
+            MudEquipmentDetail.report_id == report_id
+        ).all()
+
+    async def get_by_equipment(
+        self, 
+        db: Session, 
+        *, 
+        mud_equipment_id: str
+    ) -> List[MudEquipmentDetail]:
+        """Get all details for specific mud equipment"""
+        return db.query(MudEquipmentDetail).filter(
+            MudEquipmentDetail.mud_equipment_id == mud_equipment_id
+        ).all()
+
+crud_mud_equipment_detail = CRUDMudEquipmentDetail(MudEquipmentDetail)
+# File: backend/app/crud/jobsystem/crud_mud_pump_detail.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.mud_pump_detail import MudPumpDetail
+from app.schemas.jobsystem.mud_pump_detail import MudPumpDetailCreate, MudPumpDetailUpdate
+
+class CRUDMudPumpDetail(CRUDBase[MudPumpDetail, MudPumpDetailCreate, MudPumpDetailUpdate]):
+    async def get_by_report(
+        self, 
+        db: Session, 
+        *, 
+        report_id: str
+    ) -> List[MudPumpDetail]:
+        """Get all mud pump details for a daily report"""
+        return db.query(MudPumpDetail).filter(
+            MudPumpDetail.report_id == report_id
+        ).all()
+
+    async def get_active_pumps(
+        self, 
+        db: Session, 
+        *, 
+        report_id: str
+    ) -> List[MudPumpDetail]:
+        """Get all active mud pumps for a report"""
+        return db.query(MudPumpDetail).filter(
+            MudPumpDetail.report_id == report_id,
+            MudPumpDetail.for_hole == True
+        ).all()
+
+crud_mud_pump_detail = CRUDMudPumpDetail(MudPumpDetail)
+
+# File: backend/app/crud/jobsystem/crud_operational_parameter.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.operational_parameter import OperationalParameter
+from app.schemas.jobsystem.operational_parameter import (
+    OperationalParameterCreate, 
+    OperationalParameterUpdate
+)
+
+class CRUDOperationalParameter(CRUDBase[OperationalParameter, OperationalParameterCreate, OperationalParameterUpdate]):
+    async def get_by_wellbore(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str
+    ) -> List[OperationalParameter]:
+        """Get all operational parameters for a wellbore"""
+        return db.query(OperationalParameter).filter(
+            OperationalParameter.wellbore_id == wellbore_id
+        ).all()
+
+    async def get_by_zone(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str,
+        zone: str
+    ) -> Optional[OperationalParameter]:
+        """Get operational parameters for a specific zone"""
+        return db.query(OperationalParameter).filter(
+            OperationalParameter.wellbore_id == wellbore_id,
+            OperationalParameter.zone == zone
+        ).first()
+
+operational_parameter = OperationalParameter(OperationalParameter)
+
+# File: backend/app/crud/jobsystem/crud_operator.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.operator import Operator
+from app.schemas.jobsystem.operator import OperatorCreate, OperatorUpdate
+
+class CRUDOperator(CRUDBase[Operator, OperatorCreate, OperatorUpdate]):
+    async def get_by_company_code(
+        self, 
+        db: Session, 
+        *, 
+        company_code: str
+    ) -> Optional[Operator]:
+        """Get operator by company code"""
+        return db.query(Operator).filter(
+            Operator.company_code == company_code
+        ).first()
+
+    async def get_by_name(
+        self, 
+        db: Session, 
+        *, 
+        operator_name: str
+    ) -> Optional[Operator]:
+        """Get operator by name"""
+        return db.query(Operator).filter(
+            Operator.operator_name == operator_name
+        ).first()
+
+crud_operator = CRUDOperator(Operator)
+
+# File: backend/app/crud/jobsystem/crud_physical_barrier.py
+from typing import List, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.physical_barrier import PhysicalBarrier
+from app.schemas.jobsystem.physical_barrier import (
+    PhysicalBarrierCreate, 
+    PhysicalBarrierUpdate
+)
+
+class CRUDPhysicalBarrier(CRUDBase[PhysicalBarrier, PhysicalBarrierCreate, PhysicalBarrierUpdate]):
+    async def get_by_wellbore(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str
+    ) -> List[PhysicalBarrier]:
+        """Get all physical barriers for a wellbore"""
+        return db.query(PhysicalBarrier).filter(
+            PhysicalBarrier.wellbore_id == wellbore_id
+        ).order_by(PhysicalBarrier.depth_value).all()
+
+    async def get_verified_barriers(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str
+    ) -> List[PhysicalBarrier]:
+        """Get all verified barriers"""
+        return db.query(PhysicalBarrier).filter(
+            PhysicalBarrier.wellbore_id == wellbore_id,
+            PhysicalBarrier.verified_by.isnot(None)
+        ).all()
+
+    async def mark_verified(
+        self,
+        db: Session,
+        *,
+        barrier_id: str,
+        verified_by: str
+    ) -> Optional[PhysicalBarrier]:
+        """Mark a barrier as verified"""
+        barrier = await self.get(db=db, id=barrier_id)
+        if barrier:
+            barrier.verified_by = verified_by
+            barrier.verification_date = datetime.utcnow()
+            db.add(barrier)
+            db.commit()
+            db.refresh(barrier)
+        return barrier
+
+crud_physical_barrier = CRUDPhysicalBarrier(PhysicalBarrier)
+
+# File: backend/app/crud/jobsystem/crud_production.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.production import Production
+from app.schemas.jobsystem.production import ProductionCreate, ProductionUpdate
+
+class CRUDProduction(CRUDBase[Production, ProductionCreate, ProductionUpdate]):
+    async def get_by_type(
+        self, 
+        db: Session, 
+        *, 
+        production_type: str
+    ) -> List[Production]:
+        """Get all productions of a specific type"""
+        return db.query(Production).filter(
+            Production.production_type == production_type
+        ).all()
+
+crud_production = CRUDProduction(Production)
+
+# File: backend/app//jobsystem/_job_parameter.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import Base
+from app.models.jobsystem.job_parameter import RunParameter
+from app.schemas.jobsystem.job_parameter import (
+    RunParameterCreate, 
+    RunParameterUpdate
+)
+
+class CRUDRunParameter(Base[RunParameter, RunParameterCreate, RunParameterUpdate]):
+    async def get_by_wellbore(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str
+    ) -> List[RunParameter]:
+        """Get all run parameters for a wellbore"""
+        return db.query(RunParameter).filter(
+            RunParameter.wellbore_id == wellbore_id
+        ).all()
+
+crud_job_parameter = CRUDRunParameter(RunParameter)
+
+# File: backend/app//jobsystem/seal_assembly.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import Base
+# from app.models.jobsystem.mud_equipment_detail import MudEquipmentDetail
+from app.models.jobsystem.seal_assembly import SealAssembly
+from app.schemas.jobsystem.seal_assembly import (
+    SealAssemblyCreate, 
+    SealAssemblyUpdate
+)
+
+class CRUDSealAssembly(Base[SealAssembly, SealAssemblyCreate, SealAssemblyUpdate]):
+    async def get_by_wellbore(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str
+    ) -> List[SealAssembly]:
+        """Get all seal assemblies for a wellbore"""
+        return db.query(SealAssembly).filter(
+            SealAssembly.wellbore_id == wellbore_id
+        ).all()
+# Create instances
+crud_seal_assembly = CRUDSealAssembly(SealAssembly)
+
+# File: backend/app/crud/jobsystem/crud_slot.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.slot import Slot
+from app.schemas.jobsystem.slot import SlotCreate, SlotUpdate
+
+class CRUDSlot(CRUDBase[Slot, SlotCreate, SlotUpdate]):
+    async def get_by_installation(
+        self, 
+        db: Session, 
+        *, 
+        installation_id: str
+    ) -> List[Slot]:
+        """
+        Get all slots for a specific installation.
+        """
+        return db.query(Slot).filter(
+            Slot.installation_id == installation_id
+        ).all()
+
+    async def get_by_slot_name(
+        self, 
+        db: Session, 
+        *, 
+        slot_name: str,
+        installation_id: str
+    ) -> Optional[Slot]:
+        """
+        Get slot by name within an installation.
+        This allows for unique slot names per installation.
+        """
+        return db.query(Slot).filter(
+            Slot.slot_name == slot_name,
+            Slot.installation_id == installation_id
+        ).first()
+
+    async def get_slots_by_coordinates(
+        self,
+        db: Session,
+        *,
+        min_eastings: float,
+        max_eastings: float,
+        min_northings: float,
+        max_northings: float
+    ) -> List[Slot]:
+        """
+        Get slots within a coordinate boundary.
+        Useful for mapping and spatial queries.
+        """
+        return db.query(Slot).filter(
+            Slot.utm_eastings >= min_eastings,
+            Slot.utm_eastings <= max_eastings,
+            Slot.utm_northings >= min_northings,
+            Slot.utm_northings <= max_northings
+        ).all()
+
+    async def get_slots_with_wells(
+        self,
+        db: Session,
+        *,
+        installation_id: str
+    ) -> List[Slot]:
+        """
+        Get all slots that have associated wells.
+        """
+        return db.query(Slot).filter(
+            Slot.installation_id == installation_id,
+            Slot.wells.any()
+        ).all()
+
+    async def get_available_slots(
+        self,
+        db: Session,
+        *,
+        installation_id: str
+    ) -> List[Slot]:
+        """
+        Get all slots that don't have any associated wells.
+        Useful for planning new wells.
+        """
+        return db.query(Slot).filter(
+            Slot.installation_id == installation_id,
+            ~Slot.wells.any()
+        ).all()
+
+    async def update_coordinates(
+        self,
+        db: Session,
+        *,
+        slot_id: str,
+        utm_eastings: float = None,
+        utm_northings: float = None,
+        latitude: str = None,
+        longitude: str = None
+    ) -> Optional[Slot]:
+        """
+        Update slot coordinates with validation.
+        """
+        slot = await self.get(db=db, id=slot_id)
+        if not slot:
+            return None
+
+        if utm_eastings is not None:
+            slot.utm_eastings = utm_eastings
+        if utm_northings is not None:
+            slot.utm_northings = utm_northings
+        if latitude is not None:
+            slot.latitude = latitude
+        if longitude is not None:
+            slot.longitude = longitude
+
+        db.add(slot)
+        db.commit()
+        db.refresh(slot)
+        return slot
+
+    async def batch_create_slots(
+        self,
+        db: Session,
+        *,
+        installation_id: str,
+        slot_names: List[str]
+    ) -> List[Slot]:
+        """
+        Batch create multiple slots for an installation.
+        Useful for initial installation setup.
+        """
+        slots = []
+        for slot_name in slot_names:
+            slot = Slot(
+                installation_id=installation_id,
+                slot_name=slot_name
+            )
+            db.add(slot)
+            slots.append(slot)
+        
+        db.commit()
+        for slot in slots:
+            db.refresh(slot)
+        return slots
+
+    async def get_slot_statistics(
+        self,
+        db: Session,
+        *,
+        installation_id: str
+    ) -> dict:
+        """
+        Get statistics about slots in an installation.
+        Returns total slots, occupied slots, and available slots.
+        """
+        total_slots = await db.query(Slot).filter(
+            Slot.installation_id == installation_id
+        ).count()
+        
+        occupied_slots = await db.query(Slot).filter(
+            Slot.installation_id == installation_id,
+            Slot.wells.any()
+        ).count()
+
+        return {
+            "total_slots": total_slots,
+            "occupied_slots": occupied_slots,
+            "available_slots": total_slots - occupied_slots
+        }
+
+# Create instance
+crud_slot = CRUDSlot(Slot)
+
+
+# File: backend/app/crud/jobsystem/tally_item.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.tally_item import TallyItem
+from app.schemas.jobsystem.tally_item import TallyItemCreate, TallyItemUpdate
+
+class CRUDTallyItem(CRUDBase[TallyItem, TallyItemCreate, TallyItemUpdate]):
+    async def get_by_tally(
+        self,
+        db: Session,
+        *,
+        tally_id: str
+    ) -> List[TallyItem]:
+        """Get all items for a tally"""
+        return db.query(TallyItem).filter(
+            TallyItem.tally_id == tally_id
+        ).order_by(TallyItem.id).all()
+
+    async def get_by_serial_number(
+        self,
+        db: Session,
+        *,
+        serial_number: str
+    ) -> Optional[TallyItem]:
+        """Get item by serial number"""
+        return db.query(TallyItem).filter(
+            TallyItem.serial_number == serial_number
+        ).first()
+
+    async def calculate_total_length(
+        self,
+        db: Session,
+        *,
+        tally_id: str
+    ) -> float:
+        """Calculate total length of tally items"""
+        items = await self.get_by_tally(db=db, tally_id=tally_id)
+        return sum(item.length_value for item in items)
+
+crud_tally_item = CRUDTallyItem(TallyItem)
+
+# File: backend/app/crud/jobsystem/crud_time_sheet.py
+from typing import List, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.time_sheet import TimeSheet
+from app.schemas.jobsystem.time_sheet import TimeSheetCreate, TimeSheetUpdate
+
+class CRUDTimeSheet(CRUDBase[TimeSheet, TimeSheetCreate, TimeSheetUpdate]):
+    async def get_by_job(
+        self,
+        db: Session,
+        *,
+        job_id: str
+    ) -> List[TimeSheet]:
+        """Get all time sheets for a job"""
+        return db.query(TimeSheet).filter(
+            TimeSheet.job_id == job_id
+        ).order_by(TimeSheet.date.desc()).all()
+
+    async def get_by_employee(
+        self,
+        db: Session,
+        *,
+        employee_id: str
+    ) -> List[TimeSheet]:
+        """Get all time sheets for an employee"""
+        return db.query(TimeSheet).filter(
+            TimeSheet.employee_id == employee_id
+        ).order_by(TimeSheet.date.desc()).all()
+
+    async def get_by_date_range(
+        self,
+        db: Session,
+        *,
+        start_date: datetime,
+        end_date: datetime,
+        employee_id: Optional[str] = None
+    ) -> List[TimeSheet]:
+        """Get time sheets within date range"""
+        query = db.query(TimeSheet).filter(
+            TimeSheet.date >= start_date,
+            TimeSheet.date <= end_date
+        )
+        if employee_id:
+            query = query.filter(TimeSheet.employee_id == employee_id)
+        return query.order_by(TimeSheet.date.desc()).all()
+
+    async def get_pending_approval(
+        self,
+        db: Session,
+        *,
+        job_id: Optional[str] = None
+    ) -> List[TimeSheet]:
+        """Get time sheets pending approval"""
+        query = db.query(TimeSheet).filter(
+            TimeSheet.approved.is_(False)
+        )
+        if job_id:
+            query = query.filter(TimeSheet.job_id == job_id)
+        return query.order_by(TimeSheet.date.desc()).all()
+
+    async def approve_timesheet(
+        self,
+        db: Session,
+        *,
+        timesheet_id: str,
+        approved_by: str
+    ) -> Optional[TimeSheet]:
+        """Approve a timesheet"""
+        timesheet = await self.get(db=db, id=timesheet_id)
+        if timesheet:
+            timesheet.approved = True
+            timesheet.approved_by = approved_by
+            timesheet.approval_date = datetime.utcnow()
+            db.add(timesheet)
+            db.commit()
+            db.refresh(timesheet)
+        return timesheet
+
+    async def calculate_total_hours(
+        self,
+        db: Session,
+        *,
+        employee_id: str,
+        start_date: datetime,
+        end_date: datetime
+    ) -> float:
+        """Calculate total hours worked in date range"""
+        timesheets = await self.get_by_date_range(
+            db=db,
+            start_date=start_date,
+            end_date=end_date,
+            employee_id=employee_id
+        )
+        return sum(ts.hours_worked for ts in timesheets)
+
+
+crud_time_sheet = CRUDTimeSheet(TimeSheet)
+
+# File: backend/app/crud/jobsystem/crud_trajectory.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.trajectory import Trajectory
+from app.schemas.jobsystem.trajectory import TrajectoryCreate, TrajectoryUpdate
+
+class CRUDTrajectory(CRUDBase[Trajectory, TrajectoryCreate, TrajectoryUpdate]):
+    async def get_by_wellbore(
+        self,
+        db: Session,
+        *,
+        wellbore_id: str
+    ) -> List[Trajectory]:
+        """Get all trajectory points for a wellbore"""
+        return db.query(Trajectory).filter(
+            Trajectory.wellbore_id == wellbore_id
+        ).order_by(Trajectory.measured_depth).all()
+
+    async def get_by_depth_range(
+        self,
+        db: Session,
+        *,
+        wellbore_id: str,
+        min_depth: float,
+        max_depth: float
+    ) -> List[Trajectory]:
+        """Get trajectory points within depth range"""
+        return db.query(Trajectory).filter(
+            Trajectory.wellbore_id == wellbore_id,
+            Trajectory.measured_depth >= min_depth,
+            Trajectory.measured_depth <= max_depth
+        ).order_by(Trajectory.measured_depth).all()
+        
+crud_trajectory = CRUDTrajectory(Trajectory)
+
+# File: backend/app/crud/jobsystem/crud_tubular_type.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.tubular_type import TubularType
+from app.schemas.jobsystem.tubular_type import TubularTypeCreate, TubularTypeUpdate
+
+class CRUDTubularType(CRUDBase[TubularType, TubularTypeCreate, TubularTypeUpdate]):
+    async def get_by_type(
+        self,
+        db: Session,
+        *,
+        type_name: str
+    ) -> Optional[TubularType]:
+        """Get tubular type by name"""
+        return db.query(TubularType).filter(
+            TubularType.type == type_name
+        ).first()
+
+    async def get_by_short_name(
+        self,
+        db: Session,
+        *,
+        short_name: str
+    ) -> Optional[TubularType]:
+        """Get tubular type by short name"""
+        return db.query(TubularType).filter(
+            TubularType.type_short == short_name
+        ).first()
+
+crud_tubular_type = CRUDTubularType(TubularType)
+
+# File: backend/app/crud/jobsystem/crud_tubular.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.tubular import Tubular
+from app.schemas.jobsystem.tubular import TubularCreate, TubularUpdate
+
+class CRUDTubular(CRUDBase[Tubular, TubularCreate, TubularUpdate]):
+    async def get_by_type(
+        self,
+        db: Session,
+        *,
+        tubulartype_id: str
+    ) -> List[Tubular]:
+        """Get tubulars by type"""
+        return db.query(Tubular).filter(
+            Tubular.tubulartype_id == tubulartype_id
+        ).all()
+
+    async def get_by_thread_type(
+        self,
+        db: Session,
+        *,
+        thread: str
+    ) -> List[Tubular]:
+        """Get tubulars by thread type"""
+        return db.query(Tubular).filter(
+            Tubular.thread == thread
+        ).all()
+
+    async def get_by_diameter_range(
+        self,
+        db: Session,
+        *,
+        min_od: float,
+        max_od: float
+    ) -> List[Tubular]:
+        """Get tubulars within outer diameter range"""
+        return db.query(Tubular).filter(
+            Tubular.outer_diameter >= min_od,
+            Tubular.outer_diameter <= max_od
+        ).all()
+
+    async def get_by_depth_range(
+        self,
+        db: Session,
+        *,
+        min_depth: float,
+        max_depth: float
+    ) -> List[Tubular]:
+        """Get tubulars within depth range"""
+        return db.query(Tubular).filter(
+            Tubular.start_depth >= min_depth,
+            Tubular.end_depth <= max_depth
+        ).all()
+
+crud_tubular = CRUDTubular(Tubular)
+
+# File: backend/app/crud/jobsystem/crud_well_shape.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.well_shape import WellShape
+from app.schemas.jobsystem.well_shape import WellShapeCreate, WellShapeUpdate
+
+class CRUDWellShape(CRUDBase[WellShape, WellShapeCreate, WellShapeUpdate]):
+    async def get_by_shape(
+        self,
+        db: Session,
+        *,
+        well_shape: str
+    ) -> Optional[WellShape]:
+        """Get well shape by name"""
+        return db.query(WellShape).filter(
+            WellShape.well_shape == well_shape
+        ).first()
+
+
+crud_well_shape = CRUDWellShape(WellShape)
+
+# File: backend/app/crud/jobsystem/crud_well_type.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.well_type import WellType
+from app.schemas.jobsystem.well_type import WellTypeCreate, WellTypeUpdate
+
+class CRUDWellType(CRUDBase[WellType, WellTypeCreate, WellTypeUpdate]):
+    async def get_by_name(
+        self,
+        db: Session,
+        *,
+        well_type_name: str
+    ) -> Optional[WellType]:
+        """Get well type by name"""
+        return db.query(WellType).filter(
+            WellType.well_type_name == well_type_name
+        ).first()
+
+crud_well_type = CRUDWellType(WellType) 
+
+# File: backend/app/crud/jobsystem/crud_well.py
+from typing import List, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.well import Well
+from app.models.jobsystem.wellbore import Wellbore
+from app.schemas.jobsystem.well import WellCreate, WellUpdate
+
+class CRUDWell(CRUDBase[Well, WellCreate, WellUpdate]):
+    async def get_by_name(
+        self,
+        db: Session,
+        *,
+        well_name: str
+    ) -> Optional[Well]:
+        """Get well by name"""
+        return db.query(Well).filter(Well.well_name == well_name).first()
+
+    async def get_by_api_number(
+        self,
+        db: Session,
+        *,
+        api_number: str
+    ) -> Optional[Well]:
+        """Get well by API number"""
+        return db.query(Well).filter(Well.api_number == api_number).first()
+
+    async def get_by_slot(
+        self,
+        db: Session,
+        *,
+        slot_id: str
+    ) -> List[Well]:
+        """Get all wells in a slot"""
+        return db.query(Well).filter(Well.slot_id == slot_id).all()
+
+    async def get_by_type(
+        self,
+        db: Session,
+        *,
+        well_type_id: str
+    ) -> List[Well]:
+        """Get wells by type"""
+        return db.query(Well).filter(Well.well_type_id == well_type_id).all()
+
+    async def get_by_production_type(
+        self,
+        db: Session,
+        *,
+        production_id: str
+    ) -> List[Well]:
+        """Get wells by production type"""
+        return db.query(Well).filter(Well.production_id == production_id).all()
+
+    async def get_by_shape(
+        self,
+        db: Session,
+        *,
+        well_shape_id: str
+    ) -> List[Well]:
+        """Get wells by shape"""
+        return db.query(Well).filter(Well.well_shape_id == well_shape_id).all()
+
+    async def get_by_date_range(
+        self,
+        db: Session,
+        *,
+        start_date: datetime,
+        end_date: datetime
+    ) -> List[Well]:
+        """Get wells by spud date range"""
+        return db.query(Well).filter(
+            Well.spud_date >= start_date,
+            Well.spud_date <= end_date
+        ).order_by(Well.spud_date).all()
+
+    async def get_by_depth_range(
+        self,
+        db: Session,
+        *,
+        min_depth: float,
+        max_depth: float
+    ) -> List[Well]:
+        """Get wells by measured depth range"""
+        return db.query(Well).filter(
+            Well.measured_depth >= min_depth,
+            Well.measured_depth <= max_depth
+        ).order_by(Well.measured_depth).all()
+
+    async def get_by_coordinates(
+        self,
+        db: Session,
+        *,
+        min_easting: float,
+        max_easting: float,
+        min_northing: float,
+        max_northing: float
+    ) -> List[Well]:
+        """Get wells within coordinate bounds"""
+        return db.query(Well).filter(
+            Well.utm_eastings >= min_easting,
+            Well.utm_eastings <= max_easting,
+            Well.utm_northings >= min_northing,
+            Well.utm_northings <= max_northing
+        ).all()
+
+    async def update_statistics(
+        self,
+        db: Session,
+        *,
+        well_id: str
+    ) -> Optional[Well]:
+        """Update well statistics from related wellbores"""
+        well = await self.get(db=db, id=well_id)
+        if well is None:
+            return None
+        
+        # Get deepest wellbore MD and TVD
+        deepest_wellbore = db.query(Wellbore).filter(
+            Wellbore.well_id == well_id
+        ).order_by(Wellbore.planned_well_cost.desc()).first()
+        
+        if deepest_wellbore:
+            well.planned_well_cost = deepest_wellbore.planned_well_cost
+            well.actual_well_cost = deepest_wellbore.actual_well_cost
+            
+        db.add(well)
+        db.commit()
+        db.refresh(well)
+        return well
+
+crud_well = CRUDWell(Well)
+
+# File: backend/app/crud/jobsystem/crud_wellbore.py
+from typing import List, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.jobsystem.wellbore import Wellbore
+from app.models.jobsystem.trajectory import Trajectory
+from app.models.jobsystem.daily_report import DailyReport
+from app.models.jobsystem.physical_barrier import PhysicalBarrier
+from app.models.jobsystem.fluid import Fluid
+from app.schemas.jobsystem.wellbore import WellboreCreate, WellboreUpdate
+
+class CRUDWellbore(CRUDBase[Wellbore, WellboreCreate, WellboreUpdate]):
+    async def get_by_well(
+        self,
+        db: Session,
+        *,
+        well_id: str
+    ) -> List[Wellbore]:
+        """Get all wellbores for a well"""
+        return db.query(Wellbore).filter(
+            Wellbore.well_id == well_id
+        ).order_by(Wellbore.wellbore_number).all()
+
+    async def get_by_name(
+        self,
+        db: Session,
+        *,
+        wellbore_name: str
+    ) -> Optional[Wellbore]:
+        """Get wellbore by name"""
+        return db.query(Wellbore).filter(
+            Wellbore.wellbore_name == wellbore_name
+        ).first()
+
+    async def get_by_number(
+        self,
+        db: Session,
+        *,
+        wellbore_number: str
+    ) -> Optional[Wellbore]:
+        """Get wellbore by number"""
+        return db.query(Wellbore).filter(
+            Wellbore.wellbore_number == wellbore_number
+        ).first()
+
+    async def get_active_wellbores(
+        self,
+        db: Session
+    ) -> List[Wellbore]:
+        """Get all active wellbores (with end_date = None)"""
+        return db.query(Wellbore).filter(
+            Wellbore.end_date.is_(None)
+        ).all()
+
+    async def get_by_date_range(
+        self,
+        db: Session,
+        *,
+        start_date: datetime,
+        end_date: datetime
+    ) -> List[Wellbore]:
+        """Get wellbores by start date range"""
+        return db.query(Wellbore).filter(
+            Wellbore.start_date >= start_date,
+            Wellbore.start_date <= end_date
+        ).order_by(Wellbore.start_date).all()
+
+    async def get_planned_wellbores(
+        self,
+        db: Session
+    ) -> List[Wellbore]:
+        """Get wellbores with planned dates but not started"""
+        return db.query(Wellbore).filter(
+            Wellbore.planned_start_date.isnot(None),
+            Wellbore.start_date.is_(None)
+        ).order_by(Wellbore.planned_start_date).all()
+
+    async def get_completed_wellbores(
+        self,
+        db: Session
+    ) -> List[Wellbore]:
+        """Get completed wellbores (with end_date)"""
+        return db.query(Wellbore).filter(
+            Wellbore.end_date.isnot(None)
+        ).order_by(Wellbore.end_date.desc()).all()
+
+    async def calculate_costs(
+        self,
+        db: Session,
+        *,
+        wellbore_id: str
+    ) -> Optional[dict]:
+        """Calculate actual vs planned costs"""
+        wellbore = await self.get(db=db, id=wellbore_id)
+        if not wellbore:
+            return None
+
+        return {
+            "planned_cost": wellbore.Planned_well_cost,
+            "actual_cost": wellbore.actual_well_cost,
+            "variance": (wellbore.actual_well_cost or 0) - (wellbore.Planned_well_cost or 0),
+            "variance_percentage": (
+                ((wellbore.actual_well_cost or 0) - (wellbore.Planned_well_cost or 0)) 
+                / (wellbore.Planned_well_cost or 1)
+                * 100 if wellbore.Planned_well_cost else None
+            )
+        }
+
+    async def get_wellbore_summary(
+        self,
+        db: Session,
+        *,
+        wellbore_id: str
+    ) -> Optional[dict]:
+        """Get comprehensive wellbore summary including related data"""
+        wellbore = await self.get(db=db, id=wellbore_id)
+        if not wellbore:
+            return None
+
+        # Count related records
+        daily_reports_count = db.query(DailyReport).filter(
+            DailyReport.wellbore_id == wellbore_id
+        ).count()
+        
+        fluids_count = db.query(Fluid).filter(
+            Fluid.wellbore_id == wellbore_id
+        ).count()
+        
+        barriers_count = db.query(PhysicalBarrier).filter(
+            PhysicalBarrier.wellbore_id == wellbore_id
+        ).count()
+
+        # Get latest trajectory point
+        latest_trajectory = db.query(Trajectory).filter(
+            Trajectory.wellbore_id == wellbore_id
+        ).order_by(Trajectory.measured_depth.desc()).first()
+
+        return {
+            "wellbore_info": {
+                "name": wellbore.wellbore_name,
+                "number": wellbore.wellbore_number,
+                "status": "Active" if not wellbore.end_date else "Completed",
+                "duration": (wellbore.end_date - wellbore.start_date).days if wellbore.end_date and wellbore.start_date else None
+            },
+            "reports": {
+                "daily_reports": daily_reports_count,
+                "fluids": fluids_count,
+                "barriers": barriers_count
+            },
+            "trajectory": {
+                "max_depth": latest_trajectory.measured_depth if latest_trajectory else None,
+                "final_inclination": latest_trajectory.inclination if latest_trajectory else None,
+                "final_azimuth": latest_trajectory.azimuth if latest_trajectory else None
+            },
+            "costs": await self.calculate_costs(db=db, wellbore_id=wellbore_id)
+        }
+crud_wellbore = CRUDWellbore(Wellbore)
+
+# File: backend/app/crud/logisticssystem/crud_backload.py
+from typing import List, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.logisticssystem.backload import Backload
+from app.schemas.logisticssystem.backload import BackloadCreate, BackloadUpdate
+
+class CRUDBackload(CRUDBase[Backload, BackloadCreate, BackloadUpdate]):
+    async def get_by_wellbore(
+        self, 
+        db: Session, 
+        *, 
+        wellbore_id: str
+    ) -> List[Backload]:
+        """Get all backloads for a wellbore"""
+        return db.query(Backload).filter(
+            Backload.wellbore_id == wellbore_id
+        ).order_by(Backload.date.desc()).all()
+
+    async def get_by_sheet_number(
+        self, 
+        db: Session, 
+        *, 
+        sheet_number: str
+    ) -> Optional[Backload]:
+        """Get backload by sheet number"""
+        return db.query(Backload).filter(
+            Backload.sheet_number == sheet_number
+        ).first()
+
+    async def get_pending_approvals(
+        self,
+        db: Session,
+        *,
+        wellbore_id: Optional[str] = None
+    ) -> List[Backload]:
+        """Get backloads pending approval"""
+        query = db.query(Backload).filter(Backload.approved_by.is_(None))
+        if wellbore_id:
+            query = query.filter(Backload.wellbore_id == wellbore_id)
+        return query.order_by(Backload.date.desc()).all()
+
+    async def approve_backload(
+        self,
+        db: Session,
+        *,
+        backload_id: str,
+        approved_by: str
+    ) -> Optional[Backload]:
+        """Approve a backload"""
+        backload = await self.get(db=db, id=backload_id)
+        if backload:
+            backload.approved_by = approved_by
+            backload.status = "approved"
+            db.add(backload)
+            db.commit()
+            db.refresh(backload)
+        return backload
+
+crud_backload = CRUDBackload(Backload)
+
+# File: backend/app/crud/logisticssystem/crud_contract_type.py
+from typing import Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.logisticssystem.contract_type import ContractType
+from app.schemas.logisticssystem.contract_type import ContractTypeCreate, ContractTypeUpdate
+
+class CRUDContractType(CRUDBase[ContractType, ContractTypeCreate, ContractTypeUpdate]):
+    async def get_by_type(
+        self, 
+        db: Session, 
+        *, 
+        contract_type: str
+    ) -> Optional[ContractType]:
+        """Get contract type by name"""
+        return db.query(ContractType).filter(
+            ContractType.contract_type == contract_type
+        ).first()
+
+
+crud_contract_type = CRUDContractType(ContractType)
+
+# File: backend/app/crud/logisticssystem/crud_delivery_ticket.py
+from typing import List, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.logisticssystem.delivery_ticket import DeliveryTicket
+from app.schemas.logisticssystem.delivery_ticket import DeliveryTicketCreate, DeliveryTicketUpdate
+
+class CRUDDeliveryTicket(CRUDBase[DeliveryTicket, DeliveryTicketCreate, DeliveryTicketUpdate]):
+    async def get_by_ticket_number(
+        self, 
+        db: Session, 
+        *, 
+        ticket_number: str
+    ) -> Optional[DeliveryTicket]:
+        """Get delivery ticket by number"""
+        return db.query(DeliveryTicket).filter(
+            DeliveryTicket.ticket_number == ticket_number
+        ).first()
+
+    async def get_by_wellbore(
+        self,
+        db: Session,
+        *,
+        wellbore_id: str
+    ) -> List[DeliveryTicket]:
+        """Get all delivery tickets for a wellbore"""
+        return db.query(DeliveryTicket).filter(
+            DeliveryTicket.wellbore_id == wellbore_id
+        ).order_by(DeliveryTicket.delivery_date.desc()).all()
+
+    async def get_by_purchase_order(
+        self,
+        db: Session,
+        *,
+        purchase_order_id: str
+    ) -> List[DeliveryTicket]:
+        """Get all delivery tickets for a purchase order"""
+        return db.query(DeliveryTicket).filter(
+            DeliveryTicket.purchase_order_id == purchase_order_id
+        ).order_by(DeliveryTicket.delivery_date.desc()).all()
+
+    async def get_by_date_range(
+        self,
+        db: Session,
+        *,
+        start_date: datetime,
+        end_date: datetime,
+        wellbore_id: Optional[str] = None
+    ) -> List[DeliveryTicket]:
+        """Get delivery tickets within a date range"""
+        query = db.query(DeliveryTicket).filter(
+            DeliveryTicket.delivery_date >= start_date,
+            DeliveryTicket.delivery_date <= end_date
+        )
+        if wellbore_id:
+            query = query.filter(DeliveryTicket.wellbore_id == wellbore_id)
+        return query.order_by(DeliveryTicket.delivery_date.desc()).all()
+
+crud_delivery_ticket = CRUDDeliveryTicket(DeliveryTicket)
+
+
+# File: backend/app/crud/logisticssystem/crud_delivery_ticket_item.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.logisticssystem.delivery_ticket_item import DeliveryTicketItem
+from app.schemas.logisticssystem.delivery_ticket_item import (
+    DeliveryTicketItemCreate, 
+    DeliveryTicketItemUpdate
+)
+
+class CRUDDeliveryTicketItem(CRUDBase[DeliveryTicketItem, DeliveryTicketItemCreate, DeliveryTicketItemUpdate]):
+    async def get_by_delivery_ticket(
+        self,
+        db: Session,
+        *,
+        delivery_ticket_id: str
+    ) -> List[DeliveryTicketItem]:
+        """Get all items for a delivery ticket"""
+        return db.query(DeliveryTicketItem).filter(
+            DeliveryTicketItem.delivery_ticket_id == delivery_ticket_id
+        ).order_by(DeliveryTicketItem.item_no).all()
+
+    async def get_by_material_type(
+        self,
+        db: Session,
+        *,
+        delivery_ticket_id: str,
+        material_type: str
+    ) -> List[DeliveryTicketItem]:
+        """Get items by material type"""
+        return db.query(DeliveryTicketItem).filter(
+            DeliveryTicketItem.delivery_ticket_id == delivery_ticket_id,
+            DeliveryTicketItem.material_type == material_type
+        ).order_by(DeliveryTicketItem.item_no).all()
+
+crud_delivery_ticket_item = CRUDDeliveryTicketItem(DeliveryTicketItem)
+
+# File: backend/app/crud/logisticssystem/crud_purchase_order.py
+from typing import List, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.logisticssystem.purchase_order import PurchaseOrder
+from app.schemas.logisticssystem.purchase_order import PurchaseOrderCreate, PurchaseOrderUpdate
+
+class CRUDPurchaseOrder(CRUDBase[PurchaseOrder, PurchaseOrderCreate, PurchaseOrderUpdate]):
+    async def get_by_po_number(
+        self,
+        db: Session,
+        *,
+        po_number: str
+    ) -> Optional[PurchaseOrder]:
+        """Get purchase order by number"""
+        return db.query(PurchaseOrder).filter(
+            PurchaseOrder.po_number == po_number
+        ).first()
+
+    async def get_by_wellbore(
+        self,
+        db: Session,
+        *,
+        wellbore_id: str
+    ) -> List[PurchaseOrder]:
+        """Get all purchase orders for a wellbore"""
+        return db.query(PurchaseOrder).filter(
+            PurchaseOrder.wellbore_id == wellbore_id
+        ).order_by(PurchaseOrder.po_date.desc()).all()
+
+    async def get_by_supplier(
+        self,
+        db: Session,
+        *,
+        supplier_name: str
+    ) -> List[PurchaseOrder]:
+        """Get purchase orders by supplier"""
+        return db.query(PurchaseOrder).filter(
+            PurchaseOrder.supplier_name == supplier_name
+        ).order_by(PurchaseOrder.po_date.desc()).all()
+
+    async def get_by_date_range(
+        self,
+        db: Session,
+        *,
+        start_date: datetime,
+        end_date: datetime,
+        wellbore_id: Optional[str] = None
+    ) -> List[PurchaseOrder]:
+        """Get purchase orders within a date range"""
+        query = db.query(PurchaseOrder).filter(
+            PurchaseOrder.po_date >= start_date,
+            PurchaseOrder.po_date <= end_date
+        )
+        if wellbore_id:
+            query = query.filter(PurchaseOrder.wellbore_id == wellbore_id)
+        return query.order_by(PurchaseOrder.po_date.desc()).all()
+
+crud_purchase_order = CRUDPurchaseOrder(PurchaseOrder)
+
+# File: backend/app/crud/logisticssystem/crud_purchase_order_item.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.logisticssystem.purchase_order_item import PurchaseOrderItem
+from app.schemas.logisticssystem.purchase_order_item import (
+    PurchaseOrderItemCreate,
+    PurchaseOrderItemUpdate
+)
+
+class CRUDPurchaseOrderItem(CRUDBase[PurchaseOrderItem, PurchaseOrderItemCreate, PurchaseOrderItemUpdate]):
+    async def get_by_purchase_order(
+        self,
+        db: Session,
+        *,
+        purchase_order_id: str
+    ) -> List[PurchaseOrderItem]:
+        """Get all items for a purchase order"""
+        return db.query(PurchaseOrderItem).filter(
+            PurchaseOrderItem.purchase_order_id == purchase_order_id
+        ).order_by(PurchaseOrderItem.item_no).all()
+
+    async def get_by_service_code(
+        self,
+        db: Session,
+        *,
+        service_code: str,
+        purchase_order_id: Optional[str] = None
+    ) -> List[PurchaseOrderItem]:
+        """Get items by service code"""
+        query = db.query(PurchaseOrderItem).filter(
+            PurchaseOrderItem.service_code == service_code
+        )
+        if purchase_order_id:
+            query = query.filter(PurchaseOrderItem.purchase_order_id == purchase_order_id)
+        return query.order_by(PurchaseOrderItem.item_no).all()
+
+    async def calculate_total_amount(
+        self,
+        db: Session,
+        *,
+        purchase_order_id: str
+    ) -> float:
+        """Calculate total amount for a purchase order"""
+        items = await self.get_by_purchase_order(db=db, purchase_order_id=purchase_order_id)
+        total = sum(
+            (item.quantity * float(item.unit_price) if item.unit_price else 0)
+            - (item.discounts or 0)
+            + (item.tax or 0)
+            for item in items
+        )
+        return total
+
+crud_purchase_order_item = CRUDPurchaseOrderItem(PurchaseOrderItem)
+
+
+# File: backend/app/crud/rigsystem/crud_contractor.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.rigsystem.contractor import Contractor
+from app.schemas.rigsystem.contractor import ContractorCreate, ContractorUpdate
+
+class CRUDContractor(CRUDBase[Contractor, ContractorCreate, ContractorUpdate]):
+    async def get_by_name(
+        self, 
+        db: Session, 
+        *, 
+        contractor_name: str
+    ) -> Optional[Contractor]:
+        """Get contractor by name"""
+        return db.query(Contractor).filter(
+            Contractor.contractor_name == contractor_name
+        ).first()
+
+    async def get_by_country(
+        self,
+        db: Session,
+        *,
+        country: str
+    ) -> List[Contractor]:
+        """Get contractors by country"""
+        return db.query(Contractor).filter(
+            Contractor.country == country
+        ).all()
+
+crud_contractor = CRUDContractor(Contractor)
+
+# File: backend/app/crud/rigsystem/crud_mud_pump.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.rigsystem.mud_pump import MudPump
+from app.schemas.rigsystem.mud_pump import MudPumpCreate, MudPumpUpdate
+
+class CRUDMudPump(CRUDBase[MudPump, MudPumpCreate, MudPumpUpdate]):
+    async def get_by_rig(
+        self,
+        db: Session,
+        *,
+        rig_id: str
+    ) -> List[MudPump]:
+        """Get all mud pumps for a rig"""
+        return db.query(MudPump).filter(
+            MudPump.rig_id == rig_id
+        ).all()
+
+    async def get_by_serial_number(
+        self,
+        db: Session,
+        *,
+        serial_number: str
+    ) -> Optional[MudPump]:
+        """Get mud pump by serial number"""
+        return db.query(MudPump).filter(
+            MudPump.serial_number == serial_number
+        ).first()
+
+    async def get_by_type(
+        self,
+        db: Session,
+        *,
+        pump_type: str,
+        rig_id: Optional[str] = None
+    ) -> List[MudPump]:
+        """Get mud pumps by type"""
+        query = db.query(MudPump).filter(MudPump.pump_type == pump_type)
+        if rig_id:
+            query = query.filter(MudPump.rig_id == rig_id)
+        return query.all()
+    
+crud_mud_pump = CRUDMudPump(MudPump)
+
+# File: backend/app/crud/rigsystem/crud_rig_equipment.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.rigsystem.rig_equipment import RigEquipment
+from app.schemas.rigsystem.rig_equipment import RigEquipmentCreate, RigEquipmentUpdate
+
+class CRUDRigEquipment(CRUDBase[RigEquipment, RigEquipmentCreate, RigEquipmentUpdate]):
+    async def get_by_rig(
+        self,
+        db: Session,
+        *,
+        rig_id: str
+    ) -> Optional[RigEquipment]:
+        """Get equipment for a rig"""
+        return db.query(RigEquipment).filter(
+            RigEquipment.rig_id == rig_id
+        ).first()
+
+    async def get_by_manufacturer(
+        self,
+        db: Session,
+        *,
+        manufacturer: str
+    ) -> List[RigEquipment]:
+        """Get equipment by manufacturer"""
+        return db.query(RigEquipment).filter(
+            RigEquipment.derrick_manufacturer == manufacturer
+        ).all()
+
+crud_rig_equipment = CRUDRigEquipment(RigEquipment)
+
+# File: backend/app/crud/rigsystem/crud_rig_stability.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.rigsystem.rig_stability import RigStability
+from app.schemas.rigsystem.rig_stability import RigStabilityCreate, RigStabilityUpdate
+
+class CRUDRigStability(CRUDBase[RigStability, RigStabilityCreate, RigStabilityUpdate]):
+    async def get_by_rig(
+        self,
+        db: Session,
+        *,
+        rig_id: str
+    ) -> Optional[RigStability]:
+        """Get stability data for a rig"""
+        return db.query(RigStability).filter(
+            RigStability.rig_id == rig_id
+        ).first()
+
+    async def get_rigs_by_capacity(
+        self,
+        db: Session,
+        *,
+        min_deck_load: float
+    ) -> List[RigStability]:
+        """Get rigs by minimum deck load capacity"""
+        return db.query(RigStability).filter(
+            RigStability.max_deck_load_op_draft >= min_deck_load
+        ).all()
+
+crud_rig_stability = CRUDRigStability(RigStability)
+
+
+
+# File: backend/app/crud/rigsystem/crud_rig.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.rigsystem.rig import Rig
+from app.schemas.rigsystem.rig import RigCreate, RigUpdate
+
+class CRUDRig(CRUDBase[Rig, RigCreate, RigUpdate]):
+    async def get_by_name(
+        self,
+        db: Session,
+        *,
+        rig_name: str
+    ) -> Optional[Rig]:
+        """Get rig by name"""
+        return db.query(Rig).filter(
+            Rig.rig_name == rig_name
+        ).first()
+
+    async def get_by_contractor(
+        self,
+        db: Session,
+        *,
+        contractor_id: int
+    ) -> List[Rig]:
+        """Get all rigs for a contractor"""
+        return db.query(Rig).filter(
+            Rig.contractor_id == contractor_id
+        ).all()
+
+    async def get_by_type(
+        self,
+        db: Session,
+        *,
+        rig_type_id: int
+    ) -> List[Rig]:
+        """Get rigs by type"""
+        return db.query(Rig).filter(
+            Rig.rig_type_id == rig_type_id
+        ).all()
+
+    async def get_active_rigs(
+        self,
+        db: Session
+    ) -> List[Rig]:
+        """Get all rigs with active jobs"""
+        return db.query(Rig).filter(
+            Rig.jobs.any(job_closed=False)
+        ).all()
+        
+crud_rig = CRUDRig(Rig)
+
+# File: backend/app/crud/rigsystem/crud_rotary_equipment.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.rigsystem.rotary_equipment import RotaryEquipment
+from app.schemas.rigsystem.rotary_equipment import RotaryEquipmentCreate, RotaryEquipmentUpdate
+
+class CRUDRotaryEquipment(CRUDBase[RotaryEquipment, RotaryEquipmentCreate, RotaryEquipmentUpdate]):
+    async def get_by_rig(
+        self,
+        db: Session,
+        *,
+        rig_id: str
+    ) -> Optional[RotaryEquipment]:
+        """Get rotary equipment for a rig"""
+        return db.query(RotaryEquipment).filter(
+            RotaryEquipment.rig_id == rig_id
+        ).first()
+
+    async def get_by_manufacturer(
+        self,
+        db: Session,
+        *,
+        manufacturer: str
+    ) -> List[RotaryEquipment]:
+        """Get equipment by top drive manufacturer"""
+        return db.query(RotaryEquipment).filter(
+            RotaryEquipment.top_drive_manufacturer == manufacturer
+        ).all()
+
+    async def get_by_power_rating(
+        self,
+        db: Session,
+        *,
+        min_power: float
+    ) -> List[RotaryEquipment]:
+        """Get equipment by minimum power rating"""
+        return db.query(RotaryEquipment).filter(
+            RotaryEquipment.top_drive_power_rating >= min_power
+        ).all()
+
+crud_rotary_equipment = CRUDRotaryEquipment(RotaryEquipment)
+
+
+# File: backend/app/crud/rigsystem/crud_well_control_equipment.py
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.crud.base import CRUDBase
+from app.models.rigsystem.well_control_equipment import WellControlEquipment
+from app.schemas.rigsystem.well_control_equipment import (
+    WellControlEquipmentCreate,
+    WellControlEquipmentUpdate
+)
+
+class CRUDWellControlEquipment(CRUDBase[WellControlEquipment, WellControlEquipmentCreate, WellControlEquipmentUpdate]):
+    async def get_by_rig(
+        self,
+        db: Session,
+        *,
+        rig_id: str
+    ) -> Optional[WellControlEquipment]:
+        """Get well control equipment for a rig"""
+        return db.query(WellControlEquipment).filter(
+            WellControlEquipment.rig_id == rig_id
+        ).first()
+
+    async def get_by_pressure_rating(
+        self,
+        db: Session,
+        *,
+        min_pressure: float
+    ) -> List[WellControlEquipment]:
+        """Get equipment by minimum pressure rating"""
+        return db.query(WellControlEquipment).filter(
+            WellControlEquipment.bop_max_pressure >= min_pressure
+        ).all()
+
+    async def get_by_manufacturer(
+        self,
+        db: Session,
+        *,
+        manufacturer: str
+    ) -> List[WellControlEquipment]:
+        """Get equipment by diverter manufacturer"""
+        return db.query(WellControlEquipment).filter(
+            WellControlEquipment.diverter_manufacturer == manufacturer
+        ).all()
+
+crud_well_control_equipment = CRUDWellControlEquipment(WellControlEquipment)
+
+
+
+

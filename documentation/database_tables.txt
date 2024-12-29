@@ -1,0 +1,1166 @@
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[backload_sheet]    Script Date: 08/11/2024 18:59:20 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[backload_sheet](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NOT NULL,
+	[sheet_number] [nvarchar](50) NOT NULL,
+	[date] [datetime] NOT NULL,
+	[destination] [nvarchar](50) NOT NULL,
+	[total_weight_value] [float] NOT NULL,
+	[total_weight_unit] [nvarchar](50) NULL,
+	[transportation_details] [nvarchar](50) NULL,
+	[status] [nvarchar](50) NULL,
+	[approved_by] [nvarchar](50) NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[backload_sheet]  WITH CHECK ADD  CONSTRAINT [FK_backload_sheet_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[backload_sheet] CHECK CONSTRAINT [FK_backload_sheet_Wellbore]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[contractor]    Script Date: 08/11/2024 19:00:00 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[contractor](
+	[id] [int] IDENTITY(1,1) NOT NULL,
+	[contractor_name] [nvarchar](30) NOT NULL,
+	[address_1] [nvarchar](30) NULL,
+	[address_2] [nvarchar](30) NULL,
+	[post_code] [nchar](15) NULL,
+	[zipcode] [nchar](15) NULL,
+	[phone_no_1] [nvarchar](15) NULL,
+	[phone_no_2] [nvarchar](15) NULL,
+	[state] [nchar](30) NULL,
+	[country] [nchar](30) NULL
+) ON [PRIMARY]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[daily_report]    Script Date: 08/11/2024 19:00:43 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[daily_report](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NOT NULL,
+	[report_date] [datetime] NOT NULL,
+	[created_at] [datetime] NULL,
+	[updated_at] [datetime] NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[daily_report]  WITH CHECK ADD  CONSTRAINT [FK_daily_report_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[daily_report] CHECK CONSTRAINT [FK_daily_report_Wellbore]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[fluid]    Script Date: 08/11/2024 19:16:21 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[fluid](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NOT NULL,
+	[fluid_type] [nvarchar](50) NOT NULL,
+	[volume_value] [float] NOT NULL,
+	[volume_unit] [nvarchar](30) NULL,
+	[density_value] [float] NOT NULL,
+	[density_unit] [nvarchar](30) NULL,
+	[viscosity_value] [float] NULL,
+	[viscosity_unit] [nvarchar](30) NULL,
+	[description] [text] NULL,
+	[timestamp] [datetime] NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[fluid]  WITH CHECK ADD  CONSTRAINT [FK_fluid_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[fluid] CHECK CONSTRAINT [FK_fluid_Wellbore]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[hanger_info]    Script Date: 08/11/2024 19:16:39 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[hanger_info](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NULL,
+	[type] [nvarchar](20) NULL,
+	[burst_rating] [float] NULL,
+	[tensile_rating] [float] NULL,
+	[hanging_capacity] [float] NULL,
+	[hydraulic_setting_pressure] [float] NULL,
+ CONSTRAINT [PK_hanger_info] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[hanger_info]  WITH CHECK ADD  CONSTRAINT [FK_hanger_info_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[hanger_info] CHECK CONSTRAINT [FK_hanger_info_Wellbore]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[job]    Script Date: 08/11/2024 19:18:11 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[job](
+	[id] [nvarchar](50) NOT NULL,
+	[jobcenter_id] [nvarchar](50) NULL,
+	[well_name] [nvarchar](50) NOT NULL,
+	[po_number] [nvarchar](50) NULL,
+	[company_code] [nchar](3) NULL,
+	[service_code] [nchar](4) NULL,
+	[rig_id] [nvarchar](50) NULL,
+	[country] [nvarchar](50) NOT NULL,
+	[field] [nvarchar](50) NOT NULL,
+	[measured_depth] [float] NULL,
+	[total_vertical_depth] [nchar](10) NULL,
+	[spud_date] [datetime] NOT NULL,
+	[status] [nvarchar](30) NULL,
+	[mobilization_date] [smalldatetime] NULL,
+	[demobilization_date] [smalldatetime] NULL,
+	[created_at] [smalldatetime] NULL,
+	[updated_at] [smalldatetime] NULL,
+	[job_closed] [bit] NULL,
+	[trainingfile] [bit] NULL,
+ CONSTRAINT [PK__jobs__3213E83FFE0ECD40] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[job]  WITH CHECK ADD  CONSTRAINT [FK_job_job_center] FOREIGN KEY([jobcenter_id])
+REFERENCES [dbo].[job_center] ([id])
+GO
+
+ALTER TABLE [dbo].[job] CHECK CONSTRAINT [FK_job_job_center]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[job_center]    Script Date: 08/11/2024 19:18:51 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[job_center](
+	[id] [nvarchar](50) NOT NULL,
+	[slot_id] [int] NOT NULL,
+	[well_name] [nvarchar](25) NOT NULL,
+	[short_name] [nvarchar](10) NULL,
+	[api_number] [nvarchar](25) NULL,
+	[spud_date] [smalldatetime] NULL,
+	[well_class_id] [tinyint] NOT NULL,
+	[production_id] [tinyint] NOT NULL,
+	[well_shape_id] [tinyint] NOT NULL,
+	[utm_eastings] [float] NULL,
+	[utm_northings] [float] NULL,
+	[latitude] [nvarchar](50) NULL,
+	[longitude] [nvarchar](50) NULL,
+	[water_depth] [float] NULL,
+	[district] [nvarchar](20) NULL,
+	[address_1] [nvarchar](50) NULL,
+	[address_2] [nvarchar](50) NULL,
+	[post_code] [nvarchar](8) NULL,
+	[county] [nvarchar](30) NULL,
+	[country] [nvarchar](30) NULL,
+	[updated_by] [int] NULL,
+	[date_last_updated] [smalldatetime] NULL,
+ CONSTRAINT [PK_job_center] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[job_log]    Script Date: 08/11/2024 19:20:31 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[job_log](
+	[id] [nvarchar](50) NOT NULL,
+	[job_id] [nvarchar](50) NOT NULL,
+	[timestamp] [datetime] NOT NULL,
+	[activity_type] [nvarchar](50) NOT NULL,
+	[description] [text] NULL,
+	[duration] [float] NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[job_log]  WITH CHECK ADD  CONSTRAINT [FK_joblogs_jobs] FOREIGN KEY([job_id])
+REFERENCES [dbo].[job] ([id])
+GO
+
+ALTER TABLE [dbo].[job_log] CHECK CONSTRAINT [FK_joblogs_jobs]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[mud_equipment]    Script Date: 08/11/2024 19:21:09 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[mud_equipment](
+	[id] [nvarchar](50) NOT NULL,
+	[rig_id] [nvarchar](50) NOT NULL,
+	[equipment_name] [nvarchar](25) NULL,
+	[serial_number] [nvarchar](25) NULL,
+	[manufacturer] [nvarchar](25) NULL,
+	[model] [nvarchar](25) NULL,
+ CONSTRAINT [PK_Mud_Equipment] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[mud_equipment]  WITH CHECK ADD  CONSTRAINT [FK_Mud_Equipment_Rig] FOREIGN KEY([rig_id])
+REFERENCES [dbo].[rig] ([id])
+GO
+
+ALTER TABLE [dbo].[mud_equipment] CHECK CONSTRAINT [FK_Mud_Equipment_Rig]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[mud_equipment_detail]    Script Date: 08/11/2024 19:21:26 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[mud_equipment_detail](
+	[id] [nvarchar](50) NOT NULL,
+	[report_id] [nvarchar](50) NOT NULL,
+	[mud_equipment_id] [int] NOT NULL,
+	[hours_run] [tinyint] NULL,
+	[screeen_sizes] [nvarchar](25) NULL,
+	[active_volume_lost] [float] NULL,
+	[reserve_volume_lost] [float] NULL,
+	[other] [float] NULL,
+ CONSTRAINT [PK_Mud_Equipment_Detail] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[mud_pump]    Script Date: 08/11/2024 19:21:40 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[mud_pump](
+	[id] [nvarchar](50) NOT NULL,
+	[rig_id] [nvarchar](50) NOT NULL,
+	[serial_number] [nvarchar](25) NULL,
+	[stroke_length] [float] NULL,
+	[max_pressure] [float] NULL,
+	[power_rating] [float] NULL,
+	[manufacturer] [nvarchar](25) NULL,
+	[model] [nvarchar](25) NULL,
+	[efficiency] [float] NULL,
+	[pump_type] [nvarchar](25) NULL,
+ CONSTRAINT [PK_Mud_Pump] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[mud_pump]  WITH CHECK ADD  CONSTRAINT [FK_Mud_Pump_Rig] FOREIGN KEY([rig_id])
+REFERENCES [dbo].[rig] ([id])
+GO
+
+ALTER TABLE [dbo].[mud_pump] CHECK CONSTRAINT [FK_Mud_Pump_Rig]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[mud_pump_detail]    Script Date: 08/11/2024 19:21:56 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[mud_pump_detail](
+	[id] [nvarchar](50) NOT NULL,
+	[report_id] [nvarchar](50) NOT NULL,
+	[mud_pump_id] [int] NOT NULL,
+	[circulation_rate] [float] NOT NULL,
+	[for_hole] [bit] NOT NULL,
+ CONSTRAINT [PK_Mud_Pump_Detail] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[operational_parameters]    Script Date: 08/11/2024 19:22:32 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[operational_parameters](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NULL,
+	[zone] [nvarchar](30) NULL,
+	[wiper_trip] [bit] NULL,
+	[returns_running_liner] [bit] NULL,
+	[reamed] [tinyint] NULL,
+	[liner_to_target] [bit] NULL,
+	[ball_seat_function] [bit] NULL,
+	[hanger_function] [bit] NULL,
+	[overpull_after_relaese] [bit] NULL,
+	[surface_equipment_function] [bit] NULL,
+	[returns_cementing] [bit] NULL,
+	[packer_function] [bit] NULL,
+	[hanger_bearing_function] [bit] NULL,
+	[plug_system_function] [bit] NULL,
+	[mud_type] [bit] NULL,
+	[lcm_mud] [bit] NULL,
+	[lcm_conc] [float] NULL,
+	[lcm_formulation] [ntext] NULL,
+	[spacer_type] [int] NULL,
+	[pdp_latch] [bit] NULL,
+	[pdp_latch_at_calculated] [bit] NULL,
+	[lwp_bump] [bit] NULL,
+	[lwp_bump_at_calculated] [bit] NULL,
+	[plug_bump_pressure] [float] NULL,
+	[hrde_mech_released] [bit] NULL,
+	[pbr_filled_with] [int] NULL,
+	[reciprocate_string_during_cmt] [bit] NULL,
+	[rotated_while_setting_packer] [bit] NULL,
+	[h2s_present] [bit] NULL,
+ CONSTRAINT [PK_operational_parameters] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[operational_parameters]  WITH CHECK ADD  CONSTRAINT [FK_operational_parameters_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[operational_parameters] CHECK CONSTRAINT [FK_operational_parameters_Wellbore]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[password_reset]    Script Date: 08/11/2024 19:23:12 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[password_reset](
+	[id] [nvarchar](50) NOT NULL,
+	[user_id] [nvarchar](50) NOT NULL,
+	[token] [nvarchar](50) NOT NULL,
+	[is_used] [bit] NULL,
+	[created_at] [datetime] NULL,
+	[expires_at] [datetime] NOT NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[token] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[password_reset]  WITH CHECK ADD  CONSTRAINT [FK_password_resets_users] FOREIGN KEY([user_id])
+REFERENCES [dbo].[user] ([id])
+GO
+
+ALTER TABLE [dbo].[password_reset] CHECK CONSTRAINT [FK_password_resets_users]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[physical_barrier]    Script Date: 08/11/2024 19:23:30 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[physical_barrier](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NOT NULL,
+	[barrier_type] [nvarchar](50) NOT NULL,
+	[depth_value] [float] NOT NULL,
+	[depth_unit] [nvarchar](50) NULL,
+	[length_value] [float] NULL,
+	[length_unit] [nvarchar](50) NULL,
+	[pressure_rating_value] [float] NOT NULL,
+	[pressure_rating_unit] [nvarchar](50) NULL,
+	[installation_date] [datetime] NOT NULL,
+	[installed_by] [nvarchar](50) NOT NULL,
+	[verified_by] [nvarchar](50) NULL,
+	[verification_date] [datetime] NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[physical_barrier]  WITH CHECK ADD  CONSTRAINT [FK_physical_barrier_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[physical_barrier] CHECK CONSTRAINT [FK_physical_barrier_Wellbore]
+GO
+
+ALTER TABLE [dbo].[physical_barrier]  WITH CHECK ADD  CONSTRAINT [FK_physical_barriers_jobs] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[job] ([id])
+GO
+
+ALTER TABLE [dbo].[physical_barrier] CHECK CONSTRAINT [FK_physical_barriers_jobs]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[rig]    Script Date: 08/11/2024 19:24:02 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[rig](
+	[id] [nvarchar](50) NOT NULL,
+	[rig_name] [nvarchar](25) NOT NULL,
+	[contractor_id] [int] NOT NULL,
+	[contractor_name] [nvarchar](25) NOT NULL,
+	[air_gap] [float] NOT NULL,
+	[rig_type_id] [tinyint] NOT NULL,
+ CONSTRAINT [PK_Rig] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[rig_equipment]    Script Date: 08/11/2024 19:25:03 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[rig_equipment](
+	[id] [nvarchar](50) NOT NULL,
+	[rig_id] [nvarchar](50) NOT NULL,
+	[derrick_height] [float] NULL,
+	[derrick_rating] [float] NULL,
+	[derrick_manufacturer] [nvarchar](25) NULL,
+	[rig_model] [nvarchar](25) NULL,
+	[rig_power] [float] NULL,
+	[travel_equipment_weight] [float] NULL,
+	[kelly_manufacturer] [nvarchar](25) NULL,
+	[kelly_type] [nvarchar](25) NULL,
+	[kelly_length] [float] NULL,
+	[kelly_weight] [float] NULL,
+	[kelly_internal_diameter] [float] NULL,
+	[surface_pipe_one_id] [float] NULL,
+	[surface_pipe_one_length] [float] NULL,
+	[surface_pipe_one_pressure_rating] [float] NULL,
+	[surface_pipe_two_id] [float] NULL,
+	[surface_pipe_two_length] [float] NULL,
+	[surface_pipe_two_pressure_rating] [float] NULL,
+	[stand_pipe_id] [float] NULL,
+	[stand_pipe_length] [float] NULL,
+	[stand_pipe_pressure_rating] [float] NULL,
+	[kelly_hose_id] [float] NULL,
+	[kelly_hose_length] [float] NULL,
+	[kelly_hose_pressure_rating] [float] NULL,
+ CONSTRAINT [PK_Rig_Equipment] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[rig_equipment]  WITH CHECK ADD  CONSTRAINT [FK_Rig_Equipment_Rig] FOREIGN KEY([rig_id])
+REFERENCES [dbo].[rig] ([id])
+GO
+
+ALTER TABLE [dbo].[rig_equipment] CHECK CONSTRAINT [FK_Rig_Equipment_Rig]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[rig_stability]    Script Date: 08/11/2024 19:25:32 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[rig_stability](
+	[id] [nvarchar](50) NOT NULL,
+	[rig_id] [nvarchar](50) NOT NULL,
+	[max_deck_load_op_draft] [float] NULL,
+	[max_deck_load_survival_draft] [float] NULL,
+	[max_deck_load_transit_draft] [float] NULL,
+	[max_deck_load_water_depth] [float] NULL,
+	[number_thrusters] [float] NULL,
+	[thruster_power] [float] NULL,
+	[number_anchors] [tinyint] NULL,
+	[number_riser_tensioners] [tinyint] NULL,
+	[number_guideline_tensioners] [tinyint] NULL,
+ CONSTRAINT [PK_Rig_Stability] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[rig_stability]  WITH CHECK ADD  CONSTRAINT [FK_Rig_Stability_Rig] FOREIGN KEY([rig_id])
+REFERENCES [dbo].[rig] ([id])
+GO
+
+ALTER TABLE [dbo].[rig_stability] CHECK CONSTRAINT [FK_Rig_Stability_Rig]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[rotary_equipment]    Script Date: 08/11/2024 19:26:00 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[rotary_equipment](
+	[id] [nvarchar](50) NOT NULL,
+	[rig_id] [nvarchar](50) NOT NULL,
+	[top_drive_manufacturer] [nvarchar](25) NULL,
+	[top_drive_model] [nvarchar](25) NULL,
+	[top_drive_power_rating] [float] NULL,
+	[top_drive_torque_rating] [float] NULL,
+	[top_drive_weight] [float] NULL,
+	[rotary_table_manufacturer] [nvarchar](25) NULL,
+	[rotary_table_model] [nvarchar](25) NULL,
+	[rotary_table_power_rating] [float] NULL,
+	[rotarty_table_torque_rating] [float] NULL,
+ CONSTRAINT [PK_Rotary_Equipment] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[job_parameter]    Script Date: 08/11/2024 19:27:15 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[job_parameter](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NULL,
+	[wiper_plug_pressure_rating] [float] NULL,
+	[wiper_plug_temperature_rating] [float] NULL,
+	[setting_tool_tensile] [float] NULL,
+	[bumper_jar_tensile] [float] NULL,
+	[surface_equipment_tensile] [float] NULL,
+	[pickup_dogs] [float] NULL,
+	[pickup_pack_off] [float] NULL,
+	[shear_hrde_mech_release] [float] NULL,
+	[make_up_torque_weak_link] [float] NULL,
+	[weight_applied_packer_test] [float] NULL,
+	[liner_top_deviation] [float] NULL,
+	[ball_seat_type] [nchar](10) NULL,
+	[pack_off_type] [int] NULL,
+ CONSTRAINT [PK_job_parameter] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[job_parameter]  WITH CHECK ADD  CONSTRAINT [FK_job_parameter_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[job_parameter] CHECK CONSTRAINT [FK_job_parameter_Wellbore]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[seal_assembly]    Script Date: 08/11/2024 19:27:33 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[seal_assembly](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NULL,
+	[seal_surface_od] [float] NULL,
+	[body_burst] [float] NULL,
+	[collapse] [float] NULL,
+	[tensile] [float] NULL,
+	[tieback_extension_id] [float] NULL,
+	[tieback_extension_burst] [float] NULL,
+	[tieback_extension_collapse] [float] NULL,
+	[tieback_yield_collapse] [float] NULL,
+	[setting_force] [float] NULL,
+	[hold_down_slips] [bit] NULL,
+	[element_rating] [float] NULL,
+	[slick_stinger_od] [float] NULL,
+ CONSTRAINT [PK_seal_assembly] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[seal_assembly]  WITH CHECK ADD  CONSTRAINT [FK_seal_assembly_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[seal_assembly] CHECK CONSTRAINT [FK_seal_assembly_Wellbore]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[tally]    Script Date: 08/11/2024 19:28:13 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[tally](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NOT NULL,
+	[tally_type] [nvarchar](50) NOT NULL,
+	[date] [datetime] NOT NULL,
+	[total_length_value] [float] NOT NULL,
+	[total_length_unit] [nvarchar](50) NULL,
+	[total_weight_value] [float] NOT NULL,
+	[total_weight_unit] [nvarchar](50) NULL,
+	[created_by] [nvarchar](50) NOT NULL,
+	[verified_by] [nvarchar](50) NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[tally]  WITH CHECK ADD  CONSTRAINT [FK_tallies_jobs] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[job] ([id])
+GO
+
+ALTER TABLE [dbo].[tally] CHECK CONSTRAINT [FK_tallies_jobs]
+GO
+
+ALTER TABLE [dbo].[tally]  WITH CHECK ADD  CONSTRAINT [FK_tallies_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[tally] CHECK CONSTRAINT [FK_tallies_Wellbore]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[tally_item]    Script Date: 08/11/2024 19:28:29 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[tally_item](
+	[id] [nvarchar](50) NOT NULL,
+	[tally_id] [nvarchar](50) NOT NULL,
+	[length_value] [float] NOT NULL,
+	[length_unit] [nvarchar](50) NULL,
+	[outer_diameter_value] [float] NOT NULL,
+	[outer_diameter_unit] [nvarchar](50) NULL,
+	[inner_diameter_value] [float] NULL,
+	[inner_diameter_unit] [nvarchar](50) NULL,
+	[weight_per_unit_value] [float] NOT NULL,
+	[weight_per_unit_unit] [nvarchar](50) NULL,
+	[description] [text] NULL,
+	[serial_number] [nvarchar](50) NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[tally_item]  WITH CHECK ADD  CONSTRAINT [FK_tally_items_tallies] FOREIGN KEY([tally_id])
+REFERENCES [dbo].[tally] ([id])
+GO
+
+ALTER TABLE [dbo].[tally_item] CHECK CONSTRAINT [FK_tally_items_tallies]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[tank]    Script Date: 08/11/2024 19:28:43 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[tank](
+	[id] [int] IDENTITY(1,1) NOT NULL,
+	[rig_id] [int] NOT NULL,
+	[tank_name] [nchar](10) NULL,
+	[capacity] [float] NULL,
+	[shape] [nchar](20) NULL,
+	[length] [float] NULL,
+	[height] [float] NULL,
+	[width_top] [float] NULL,
+	[width_bottom] [float] NULL
+) ON [PRIMARY]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[time_sheet]    Script Date: 08/11/2024 19:28:57 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[time_sheet](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NOT NULL,
+	[employee_id] [nvarchar](50) NOT NULL,
+	[date] [datetime] NOT NULL,
+	[hours_worked] [float] NOT NULL,
+	[activity_code] [varchar](1) NOT NULL,
+	[description] [text] NULL,
+	[approved] [bit] NULL,
+	[approved_by] [nvarchar](50) NULL,
+	[approval_date] [datetime] NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[time_sheet]  WITH CHECK ADD  CONSTRAINT [FK_time_sheet_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[time_sheet] CHECK CONSTRAINT [FK_time_sheet_Wellbore]
+GO
+
+ALTER TABLE [dbo].[time_sheet]  WITH CHECK ADD  CONSTRAINT [FK_time_sheets_jobs] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[job] ([id])
+GO
+
+ALTER TABLE [dbo].[time_sheet] CHECK CONSTRAINT [FK_time_sheets_jobs]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[trajectory]    Script Date: 08/11/2024 19:29:13 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[trajectory](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NOT NULL,
+	[measured_depth] [float] NOT NULL,
+	[inclination] [float] NOT NULL,
+	[azimuth] [float] NOT NULL,
+ CONSTRAINT [PK_trajectory] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[trajectory]  WITH CHECK ADD  CONSTRAINT [FK_trajectory_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[trajectory] CHECK CONSTRAINT [FK_trajectory_Wellbore]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[Tubular]    Script Date: 08/11/2024 19:32:31 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[Tubular](
+	[id] [nvarchar](50) NOT NULL,
+	[tubulartype_id] [nvarchar](50) NOT NULL,
+	[outer_diameter] [float] NULL,
+	[inner_diameter] [float] NULL,
+	[weight] [float] NULL,
+	[yield_strength] [float] NULL,
+	[capacity] [float] NULL,
+	[volume] [float] NULL,
+	[thread] [nchar](15) NULL,
+	[burst] [float] NULL,
+	[collapse] [float] NULL,
+	[drift] [float] NULL,
+	[oh_diameter] [float] NULL,
+	[liner_Overlap] [float] NULL,
+	[start_depth] [float] NULL,
+	[end_depth] [float] NULL,
+	[liner_top_depth] [nchar](10) NULL,
+ CONSTRAINT [PK_Tubular] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[Tubular]  WITH CHECK ADD  CONSTRAINT [FK_Tubular_TubularType] FOREIGN KEY([tubulartype_id])
+REFERENCES [dbo].[TubularType] ([id])
+GO
+
+ALTER TABLE [dbo].[Tubular] CHECK CONSTRAINT [FK_Tubular_TubularType]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[TubularType]    Script Date: 08/11/2024 19:34:50 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[TubularType](
+	[id] [nvarchar](50) NOT NULL,
+	[type] [nvarchar](15) NULL,
+	[type_short] [nvarchar](3) NULL,
+	[description] [nvarchar](50) NULL,
+ CONSTRAINT [PK_TubularType] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[user]    Script Date: 08/11/2024 19:37:27 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[user](
+	[id] [nvarchar](50) NOT NULL,
+	[username] [nvarchar](50) NOT NULL,
+	[email] [nvarchar](50) NOT NULL,
+	[full_name] [nvarchar](50) NULL,
+	[hashed_password] [nvarchar](100) NOT NULL,
+	[is_active] [bit] NULL,
+	[is_verified] [bit] NULL,
+	[verification_token] [nvarchar](50) NULL,
+	[created_at] [datetime] NULL,
+	[updated_at] [datetime] NULL,
+ CONSTRAINT [PK__users__3213E83FE5F13A74] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UQ__users__4604B4D1BDF7F95B] UNIQUE NONCLUSTERED 
+(
+	[verification_token] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[user_session]    Script Date: 08/11/2024 19:39:14 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[user_session](
+	[id] [nvarchar](50) NOT NULL,
+	[user_id] [nvarchar](50) NOT NULL,
+	[access_token] [nvarchar](50) NOT NULL,
+	[refresh_token] [nvarchar](50) NULL,
+	[expires_at] [datetime] NOT NULL,
+	[created_at] [datetime] NULL,
+	[last_activity] [datetime] NULL,
+	[is_active] [bit] NULL,
+	[device_info] [nvarchar](50) NULL,
+	[ip_address] [nvarchar](50) NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[access_token] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[refresh_token] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[user_session]  WITH CHECK ADD  CONSTRAINT [FK_user_sessions_users] FOREIGN KEY([user_id])
+REFERENCES [dbo].[user] ([id])
+GO
+
+ALTER TABLE [dbo].[user_session] CHECK CONSTRAINT [FK_user_sessions_users]
+GO
+
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[well_control_Equipment]    Script Date: 08/11/2024 19:39:23 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[well_control_Equipment](
+	[id] [nvarchar](50) NOT NULL,
+	[rig_id] [nvarchar](50) NOT NULL,
+	[choke_line_diameter] [float] NULL,
+	[choke_line_pressure] [float] NULL,
+	[kill_line_diameter] [float] NULL,
+	[bop_size] [float] NULL,
+	[bop_max_pressure] [float] NULL,
+	[bop_max_temperature] [float] NULL,
+	[diverter_manufacturer] [nvarchar](25) NULL,
+	[diverter_model] [nvarchar](25) NULL,
+	[line_number] [tinyint] NULL,
+	[internal_diameter] [float] NULL,
+	[max_pressure] [float] NULL,
+	[line_length] [float] NULL,
+	[closing_time] [float] NULL,
+ CONSTRAINT [PK_well_control_Equipment] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[well_control_Equipment]  WITH CHECK ADD  CONSTRAINT [FK_well_control_Equipment_Rig] FOREIGN KEY([rig_id])
+REFERENCES [dbo].[rig] ([id])
+GO
+
+ALTER TABLE [dbo].[well_control_Equipment] CHECK CONSTRAINT [FK_well_control_Equipment_Rig]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[Wellbore]    Script Date: 08/11/2024 19:39:37 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[Wellbore](
+	[id] [nvarchar](50) NOT NULL,
+	[job_id] [nvarchar](50) NOT NULL,
+	[short_name] [nchar](10) NOT NULL,
+	[wellbore_name] [nvarchar](25) NOT NULL,
+	[wellbore_number] [nvarchar](25) NULL,
+	[contract_type_id] [tinyint] NULL,
+	[start_date] [date] NULL,
+	[end_date] [date] NULL,
+	[primary_currency] [nchar](10) NULL,
+	[secondary_currency] [nchar](10) NULL,
+	[planned_start_date] [date] NULL,
+	[Planned_days] [tinyint] NULL,
+	[Planned_well_cost] [decimal](12, 3) NULL,
+	[actual_well_cost] [decimal](12, 3) NULL,
+ CONSTRAINT [PK_Wellbore] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[Wellbore]  WITH CHECK ADD  CONSTRAINT [FK_Wellbore_job] FOREIGN KEY([job_id])
+REFERENCES [dbo].[job] ([id])
+GO
+
+ALTER TABLE [dbo].[Wellbore] CHECK CONSTRAINT [FK_Wellbore_job]
+GO
+
+USE [FieldtraxDB]
+GO
+
+/****** Object:  Table [dbo].[wellbore_geometry]    Script Date: 08/11/2024 19:39:53 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[wellbore_geometry](
+	[id] [nvarchar](50) NOT NULL,
+	[wellbore_id] [nvarchar](50) NOT NULL,
+	[tubular_id] [nvarchar](50) NOT NULL,
+ CONSTRAINT [PK__welldata__3213E83FB15F6072] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[wellbore_geometry]  WITH CHECK ADD  CONSTRAINT [FK_wellbore_geometry_Wellbore] FOREIGN KEY([wellbore_id])
+REFERENCES [dbo].[Wellbore] ([id])
+GO
+
+ALTER TABLE [dbo].[wellbore_geometry] CHECK CONSTRAINT [FK_wellbore_geometry_Wellbore]
+GO
+
+ALTER TABLE [dbo].[wellbore_geometry]  WITH CHECK ADD  CONSTRAINT [FK_welldata_Tubular] FOREIGN KEY([tubular_id])
+REFERENCES [dbo].[Tubular] ([id])
+GO
+
+ALTER TABLE [dbo].[wellbore_geometry] CHECK CONSTRAINT [FK_welldata_Tubular]
+GO
+

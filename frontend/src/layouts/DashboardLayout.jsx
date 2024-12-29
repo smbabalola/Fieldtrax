@@ -54,8 +54,7 @@ const DashboardLayout = () => {
     );
   }
 
-  // Safely access display settings with fallback
-  const { display = { sidebarOpen: true }, activeJobId } = settings;
+  const { display = { sidebarOpen: true } } = settings;
 
   return (
     <div className="d-flex min-vh-100">
@@ -66,12 +65,12 @@ const DashboardLayout = () => {
       />
 
       {/* Job Sidebar - Only show if there's an active job */}
-      {activeJobId && <JobSidebar />}
+      {settings.activeJobId && <JobSidebar />}
 
       {/* Main Content */}
       <div className={`flex-grow-1 d-flex flex-column transition-all ${
         display.sidebarOpen ? 'margin-left-expanded' : 'margin-left-collapsed'
-      } ${activeJobId ? 'margin-right-expanded' : ''}`}>
+      } ${settings.activeJobId ? 'margin-right-expanded' : ''}`}>
         {/* Top Navigation */}
         <Navbar bg="light" expand="lg" className="border-bottom">
           <Container fluid>

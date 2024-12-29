@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.jsx
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { Container, Row, Col, Card } from 'react-bootstrap';
@@ -16,14 +16,14 @@ import {
   selectJobsPagination,
   selectJobsSorting,
   selectJobsFilters,
-  clearErrors 
 } from '../store/slices/jobsSlice';
+import { openCreateJobModal } from '../store/slices/uiSlice';
 import JobsTable from '../components/jobs/JobsTable';
 import JobFilters from '../components/jobs/JobFilters';
 import CreateJobModal from '../components/jobs/CreateJobModal';
 import * as jobService from '../services/jobService';
 
-// StatCard Component
+// StatCard Component remains the same
 const StatCard = ({ title, count, variant = 'primary', icon }) => (
   <Col md={3} className="mb-4">
     <Card className={`border-0 bg-${variant} bg-opacity-10 h-100`}>
@@ -45,7 +45,6 @@ const StatCard = ({ title, count, variant = 'primary', icon }) => (
 const DashboardPage = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Redux selectors
   const jobs = useSelector(selectJobs);
@@ -70,24 +69,21 @@ const DashboardPage = () => {
   // Fetch jobs data
   const fetchJobsData = async () => {
     try {
-      console.log('Fetching jobs with params:', {
-        page: pagination.currentPage,
-        pageSize: pagination.pageSize,
-        sorting,
-        filters
-      });
-
-      await dispatch(fetchJobs({
+      const response = await dispatch(fetchJobs({
         page: pagination.currentPage,
         pageSize: pagination.pageSize,
         sortField: sorting.field,
-        sortOrder: sorting.order,
-        ...filters
+        sortOrder: sorting.direction,
+        status: filters.status,
+        searchTerm: filters.searchTerm
       })).unwrap();
-
+  
+      if (!response?.items) {
+        throw new Error('Invalid jobs data format');
+      }
     } catch (err) {
       console.error('Error fetching jobs:', err);
-      if (err.response?.status === 401) {
+      if (err.message === 'Authentication required') {
         navigate('/login');
       } else {
         toast.error(err.message || 'Failed to fetch jobs');
@@ -96,12 +92,6 @@ const DashboardPage = () => {
   };
 
   // Initial fetch and cleanup
-  useEffect(() => {
-    fetchJobsData();
-    return () => dispatch(clearErrors());
-  }, []);
-
-  // Fetch on filter/sort/page change
   useEffect(() => {
     fetchJobsData();
   }, [pagination.currentPage, pagination.pageSize, sorting, filters]);
@@ -126,11 +116,16 @@ const DashboardPage = () => {
     dispatch(setFilter(newFilters));
   };
 
+  const handleCreateJob = () => {
+    dispatch(openCreateJobModal());
+  };
+
+  // Bulk action handlers
   const handleBulkStatusChange = async (status, selectedJobs) => {
     try {
       await Promise.all(
         selectedJobs.map(jobId => 
-          jobService.updateJobStatus(jobId, status)
+          jobService.update(jobId, { status })
         )
       );
       toast.success(`Successfully updated ${selectedJobs.length} jobs to ${status}`);
@@ -143,7 +138,7 @@ const DashboardPage = () => {
 
   const handleBulkExport = async (selectedJobs) => {
     try {
-      const response = await jobService.exportJobs(selectedJobs);
+      const response = await jobService.export(selectedJobs);
       const blob = new Blob([response.data], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -168,7 +163,7 @@ const DashboardPage = () => {
     try {
       await Promise.all(
         selectedJobs.map(jobId => 
-          jobService.deleteJob(jobId)
+          jobService.delete(jobId)
         )
       );
       toast.success(`Successfully deleted ${selectedJobs.length} jobs`);
@@ -222,7 +217,7 @@ const DashboardPage = () => {
                 <div>
                   <button 
                     className="btn btn-primary"
-                    onClick={() => setShowCreateModal(true)}
+                    onClick={handleCreateJob}
                     disabled={loading}
                   >
                     <i className="bi bi-plus-circle me-2"></i>
@@ -232,7 +227,6 @@ const DashboardPage = () => {
               </div>
             </Card.Header>
             <Card.Body className="p-0">
-              {/* Show filters if we have data */}
               {jobs.length > 0 && (
                 <div className="p-3 border-bottom">
                   <JobFilters
@@ -244,12 +238,6 @@ const DashboardPage = () => {
                 </div>
               )}
               
-              {error && (
-                <div className="alert alert-danger m-3">
-                  {error}
-                </div>
-              )}
-
               <JobsTable 
                 jobs={jobs}
                 loading={loading}
@@ -260,7 +248,6 @@ const DashboardPage = () => {
                 onSort={handleSort}
                 onPageChange={handlePageChange}
                 onFilterChange={handleFilterChange}
-                onCreateJob={() => setShowCreateModal(true)}
                 onBulkStatusChange={handleBulkStatusChange}
                 onBulkExport={handleBulkExport}
                 onBulkDelete={handleBulkDelete}
@@ -271,15 +258,7 @@ const DashboardPage = () => {
       </Row>
 
       {/* Create Job Modal */}
-      <CreateJobModal
-        show={showCreateModal}
-        onHide={() => setShowCreateModal(false)}
-        onSuccess={() => {
-          setShowCreateModal(false);
-          fetchJobsData();
-          toast.success('Job created successfully');
-        }}
-      />
+      <CreateJobModal />
     </Container>
   );
 };

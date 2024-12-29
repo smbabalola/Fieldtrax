@@ -10,7 +10,7 @@ export default defineConfig({
     port: 3000,
     host: true,
     proxy: {
-      '/api': {
+      '/api/v1': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false
@@ -55,5 +55,8 @@ export default defineConfig({
         additionalData: `@import "bootstrap/scss/bootstrap";`
       }
     }
+  },
+  define: {
+    'process.env.VITE_API_URL': JSON.stringify('http://localhost:8000/api/v1')
   }
 });

@@ -20,10 +20,23 @@ async def create_job(
 async def read_jobs(
     skip: int = 0,
     limit: int = 100,
+    sort_field: str = "created_at",
+    sort_order: str = "desc",
+    status: str = None,
+    search_term: str = None,
     db: Session = Depends(get_db)
 ):
-    """Get all jobs"""
-    return await crud_job.get_multi(db, skip=skip, limit=limit)
+    """Get all jobs with optional filters"""
+    filters = {
+        "sort_field": sort_field,
+        "sort_order": sort_order,
+        "status": status,
+        "search_term": search_term
+    }
+    jobs = await crud_job.get_multi(db, skip=skip, limit=limit, filters=filters)
+    if not jobs:
+        raise HTTPException(status_code=404, detail="No jobs found")
+    return jobs
 
 @router.get("/active", response_model=List[JobResponse])
 async def read_active_jobs(

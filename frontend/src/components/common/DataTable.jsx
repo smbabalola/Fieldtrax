@@ -1,3 +1,4 @@
+// frontend\src\components\common\DataTable.jsx
 import React from 'react';
 import { Table, Pagination } from 'react-bootstrap';
 import { FaSort, FaSortUp, FaSortDown } from 'react-icons/fa';
@@ -135,3 +136,5 @@ export const DataTable = ({
     </div>
   );
 };
+
+export default DataTable;

@@ -1,0 +1,4102 @@
+# File: backend/app/api/v1/endpoints/auth/auth.py
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session
+from app.crud.authsystem.user import crud_user
+from app.crud.authsystem.user_session import crud_user_session
+from app.schemas.authsystem.user_session import UserSessionBase as UserSession, UserSessionCreate
+from app.core.deps import get_db, get_current_session
+from app.core.security import create_access_token, create_refresh_token
+
+router = APIRouter()
+
+@router.post("/verify", response_model=dict)
+async def verify_auth(
+    current_session: UserSession = Depends(get_current_session),    
+):
+    """Verify authentication status"""
+    return {"authenticated": True, "session_id": current_session.id}
+
+@router.post("/logout")
+async def logout(
+    current_session: UserSession = Depends(get_current_session),
+    db: Session = Depends(get_db)
+):
+    """Logout user"""
+    await crud_user_session.deactivate_session(db=db, session_id=current_session.id)
+    return {"message": "Successfully logged out"}
+
+@router.post("/refresh", response_model=UserSession)
+async def refresh_token(
+    refresh_token: str,
+    db: Session = Depends(get_db)
+):
+    """Refresh access token using refresh token"""
+    session = await crud_user_session.get_by_refresh_token(db=db, refresh_token=refresh_token)
+    if not session or not session.is_active:
+        raise HTTPException(status_code=400, detail="Invalid refresh token")
+    
+    # Generate new tokens
+    new_access_token = create_access_token()
+    new_refresh_token = create_refresh_token()
+    
+    # Update session
+    updated_session = await crud_user_session.update_tokens(
+        db=db,
+        session_id=session.id,
+        access_token=new_access_token,
+        refresh_token=new_refresh_token
+    )
+    return updated_session
+
+# File: backend/app/api/v1/endpoints/auth/password_reset.pyfrom fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session
+from app.crud.authsystem.password_reset import crud_password_reset
+from app.crud.authsystem.user import crud_user
+from app.schemas.authsystem.password_reset import (
+    PasswordResetCreate,
+    PasswordResetResponse as PasswordReset
+)
+from app.core.deps import get_db
+from app.core.security import get_password_hash, validate_password_strength
+from app.core.email import send_password_reset_email
+from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+@router.post("/request-reset")
+async def request_password_reset(
+    email: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Request password reset token"""
+    logger.info(f"Password reset requested for email: {email}")
+    
+    try:
+        # Get user without revealing if email exists
+        user = await run_in_threadpool(crud_user.get_by_email, db, email=email)
+        if not user:
+            logger.info(f"No user found for email: {email}")
+            return {"message": "If email exists, password reset instructions will be sent"}
+
+        # Create reset token
+        reset_token = await crud_password_reset.create_reset_token(db=db, user_id=user.id)
+        logger.info(f"Reset token created for user: {user.id}")
+
+        # Send email in background
+        background_tasks.add_task(
+            send_password_reset_email,
+            email=email,
+            reset_token=reset_token.token
+        )
+        logger.info(f"Reset email queued for sending to: {email}")
+
+        return {"message": "If email exists, password reset instructions will be sent"}
+    
+    except Exception as e:
+        logger.error(f"Error in password reset request: {str(e)}")
+        # Don't reveal internal errors to user
+        return {"message": "If email exists, password reset instructions will be sent"}
+
+@router.post("/reset-password")
+async def reset_password(
+    token: str,
+    new_password: str,
+    db: Session = Depends(get_db)
+):
+    """Reset password using token"""
+    try:
+        # Validate password strength
+        password_validation = validate_password_strength(new_password)
+        if not password_validation['meets_requirements']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Password does not meet requirements",
+                    "requirements": password_validation['requirements'],
+                    "feedback": password_validation['feedback']
+                }
+            )
+
+        # Verify token
+        reset_token = await crud_password_reset.get_valid_token(db=db, token=token)
+        if not reset_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired reset token"
+            )
+
+        # Get user
+        user = await crud_user.get(db=db, id=reset_token.user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        # Update password
+        hashed_password = get_password_hash(new_password)
+        await crud_user.update(db=db, db_obj=user, obj_in={"password": hashed_password})
+
+        # Mark token as used
+        await crud_password_reset.mark_used(db=db, db_obj=reset_token)
+
+        logger.info(f"Password reset successful for user: {user.id}")
+        return {"message": "Password reset successful"}
+
+    except HTTPException as he:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error in password reset: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while resetting password"
+        )
+
+# Permissions endpoints
+from fastapi import APIRouter, Depends
+from pytest import Session
+from app.api import deps
+from documentation.schema import User
+from app.crud import crud_role
+
+router = APIRouter()
+@router.post("/{role_id}/permissions/{permission_id}")
+def add_permission_to_role(
+    role_id: str,
+    permission_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
+):
+    return crud_role.add_permission(db, role_id=role_id, permission_id=permission_id)
+
+@router.delete("/{role_id}/permissions/{permission_id}")
+def remove_permission_from_role(
+    role_id: str,
+    permission_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
+):
+    return crud_role.remove_permission(db, role_id=role_id, permission_id=permission_id)
+# api/v1/endpoints/role.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+from app.core.security import get_current_user
+from app.api import deps
+from app.crud import crud_role
+from app.models.authsystem.user import User
+from app.schemas.role import Role, RoleCreate, RoleUpdate
+
+router = APIRouter()
+
+@router.post("/", response_model=Role)
+def create_role(
+    role: RoleCreate,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
+):
+    return crud_role.create(db, obj_in=role)
+
+@router.get("/", response_model=List[Role])
+def read_roles(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user)
+):
+    return crud_role.get_multi(db, skip=skip, limit=limit)
+
+@router.put("/{role_id}", response_model=Role)
+def update_role(
+    role_id: str,
+    role: RoleUpdate,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
+):
+    db_role = crud_role.get(db, id=role_id)
+    if not db_role:
+        raise HTTPException(status_code=404, detail="Role not found")
+    return crud_role.update(db, db_obj=db_role, obj_in=role)
+
+@router.delete("/{role_id}")
+def delete_role(
+    role_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
+):
+    db_role = crud_role.get(db, id=role_id)
+    if not db_role:
+        raise HTTPException(status_code=404, detail="Role not found")
+    crud_role.remove(db, id=role_id)
+    return {"message": "Role deleted successfully"}
+
+# Permissions endpoints
+@router.post("/{role_id}/permissions/{permission_id}")
+def add_permission_to_role(
+    role_id: str,
+    permission_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
+):
+    return crud_role.add_permission(db, role_id=role_id, permission_id=permission_id)
+
+@router.delete("/{role_id}/permissions/{permission_id}")
+def remove_permission_from_role(
+    role_id: str,
+    permission_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
+):
+    return crud_role.remove_permission(db, role_id=role_id, permission_id=permission_id)
+
+# User-Role management endpoints
+@router.post("/users/{user_id}/roles/{role_id}")
+def assign_role_to_user(
+    user_id: str,
+    role_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
+):
+    return crud_role.assign_to_user(db, user_id=user_id, role_id=role_id)
+
+@router.delete("/users/{user_id}/roles/{role_id}")
+def remove_role_from_user(
+    user_id: str,
+    role_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
+):
+    return crud_role.remove_from_user(db, user_id=user_id, role_id=role_id)
+
+# File: backend/app/api/v1/endpoints/auth/user_session.py
+from fastapi import APIRouter, Depends, Form, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.crud.authsystem.user_session import crud_user_session
+from app.schemas.authsystem.user_session import (
+    UserSessionResponse,
+    UserSessionCreate,
+    UserSessionUpdate
+)
+from app.core.deps import get_db, get_current_user, get_current_session
+from app.schemas.authsystem.user import UserResponse as User
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    verify_token
+)
+
+# oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="api/v1/token",  # Match the actual endpoint path
+    auto_error=True
+)
+
+router = APIRouter()
+
+# Add login request model
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    device_info: str | None = None
+    ip_address: str | None = None
+
+# @router.post("/token", response_model=UserSessionResponse)
+# async def login_for_access_token(
+#     form_data: OAuth2PasswordRequestForm = Depends(),
+#     db: Session = Depends(get_db)
+# ):
+#     """OAuth2 compatible token login"""
+#     user = await crud_user_session.authenticate(
+#         db=db,
+#         email=form_data.username,
+#         password=form_data.password
+#     )
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Incorrect email or password",
+#             headers={"WWW-Authenticate": "Bearer"},
+#         )
+
+#     access_token = create_access_token(data={"sub": user.id})
+#     refresh_token = create_refresh_token(data={"sub": user.id})
+
+#     session = await crud_user_session.create_session(
+#         db=db,
+#         user_id=user.id,
+#         access_token=access_token,
+#         refresh_token=refresh_token
+#     )
+
+#     return session
+
+
+@router.post("/login", response_model=UserSessionResponse)
+async def login_json(
+    login_data: LoginRequest,
+    db: Session = Depends(get_db)
+):
+    """Login endpoint for JSON requests"""
+    user = await crud_user_session.authenticate(
+        db=db,
+        email=login_data.email,
+        password=login_data.password
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive user"
+        )
+
+    # Create tokens
+    access_token = create_access_token(data={"sub": user.id})
+    refresh_token = create_refresh_token(data={"sub": user.id})
+
+    # Create session
+    session = await crud_user_session.create_session(
+        db=db,
+        user_id=user.id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        device_info=login_data.device_info,
+        ip_address=login_data.ip_address
+    )
+
+    return session
+
+# Form data login endpoint
+@router.post("/login/form", response_model=UserSessionResponse)
+async def login_form(
+    email: str = Form(...),
+    password: str = Form(...),
+    device_info: Optional[str] = Form(None),
+    ip_address: Optional[str] = Form(None),
+
+    db: Session = Depends(get_db)
+):
+    """Login endpoint for form data"""
+    user = await crud_user_session.authenticate(db=db, email=email, password=password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive user"
+        )
+
+    # Create tokens
+    access_token = create_access_token(data={"sub": user.id})
+    refresh_token = create_refresh_token(data={"sub": user.id})
+
+    # Create session
+    session = await crud_user_session.create_session(
+        db=db,
+        user_id=user.id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        device_info=device_info,
+        ip_address=ip_address
+    )
+
+    return session
+
+# @router.post("/token", response_model=UserSessionResponse)
+# async def login_for_access_token(
+#     form_data: OAuth2PasswordRequestForm = Depends(),
+#     db: Session = Depends(get_db)
+# ):
+#     """OAuth2 compatible token login"""
+#     user = await crud_user_session.authenticate(
+#         db=db,
+#         email=form_data.username,
+#         password=form_data.password
+#     )
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Incorrect email or password",
+#             headers={"WWW-Authenticate": "Bearer"},
+#         )
+
+#     access_token = create_access_token(data={"sub": user.id})
+#     refresh_token = create_refresh_token(data={"sub": user.id})
+
+#     session = await crud_user_session.create_session(
+#         db=db,
+#         user_id=user.id,
+#         access_token=access_token,
+#         refresh_token=refresh_token
+#     )
+
+#     return session
+
+@router.post("/token", response_model=UserSessionResponse)
+async def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    """OAuth2 compatible token login"""
+    try:
+        print(f"Token endpoint hit with username: {form_data.username}")  # Debug print
+        user = await crud_user_session.authenticate(
+            db=db,
+            email=form_data.username,
+            password=form_data.password
+        )
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Inactive user"
+            )
+
+        access_token = create_access_token(data={"sub": user.id})
+        refresh_token = create_refresh_token(data={"sub": user.id})
+
+        session = await crud_user_session.create_session(
+            db=db,
+            user_id=user.id,
+            access_token=access_token,
+            refresh_token=refresh_token
+        )
+
+        return session
+    except Exception as e:
+        print(f"Error in token endpoint: {str(e)}")  # Debug print
+        raise
+
+@router.post("/refresh", response_model=UserSessionResponse)
+async def refresh_token(
+    refresh_token: str,
+    db: Session = Depends(get_db)
+):
+    """Refresh access token"""
+    print("Refresh token endpoint hit")  # Debugging statement
+    try:
+        payload = verify_token(refresh_token, token_type="refresh")
+        user_id = payload.get("sub")
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+    # Create new tokens
+    access_token = create_access_token(data={"sub": user_id})
+    new_refresh_token = create_refresh_token(data={"sub": user_id})
+
+    # Update session
+    session = await crud_user_session.get_by_refresh_token(db=db, refresh_token=refresh_token)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+
+    updated_session = await crud_user_session.update(
+        db=db,
+        db_obj=session,
+        obj_in={
+            "access_token": access_token,
+            "refresh_token": new_refresh_token
+        }
+    )
+
+    return updated_session
+
+@router.get("/active", response_model=List[UserSessionResponse])
+async def get_active_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all active sessions for current user"""
+    return await crud_user_session.get_active_sessions(db=db, user_id=current_user.id)
+
+@router.post("/logout")
+async def logout(
+    current_session: UserSessionResponse = Depends(get_current_session),
+    db: Session = Depends(get_db)
+):
+    """Logout current session"""
+    await crud_user_session.deactivate_session(db=db, session_id=current_session.id)
+    return {"message": "Successfully logged out"}
+
+@router.post("/logout/all")
+async def logout_all(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Logout all sessions for current user"""
+    await crud_user_session.deactivate_all_sessions(db=db, user_id=current_user.id)
+    return {"message": "Successfully logged out all sessions"}
+
+@router.put("/update-activity")
+async def update_last_activity(
+    current_session: UserSessionResponse = Depends(get_current_session),
+    db: Session = Depends(get_db)
+):
+    """Update last activity timestamp"""
+    await crud_user_session.update_last_activity(db=db, session_id=current_session.id)
+    return {"message": "Activity timestamp updated"}
+
+# File: backend/app/api/v1/endpoints/auth/user.py
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.core.deps import get_db, get_current_user
+from app.core.security import (
+    verify_password,
+    get_password_hash,
+    generate_verification_token,
+    verify_verification_token,
+    generate_reset_token
+)
+from app.crud.authsystem.user import crud_user
+from app.crud.authsystem.password_reset import crud_password_reset
+from app.schemas.authsystem.user import UserResponse, UserCreate, UserUpdate
+from app.schemas.authsystem.password_reset import PasswordResetCreate
+from app.core.email import (
+    send_verification_email,
+    send_password_reset_email
+)
+
+router = APIRouter(
+    # prefix="/auth",
+    tags = ['users']
+)
+
+@router.post("/", response_model=UserResponse)
+async def create_user(
+    user_in: UserCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Create new user"""
+    # Check if user exists
+    # user = await crud_user.get_by_email(db, email=user_in.email)
+    user = crud_user.get_by_email(db, email=user_in.email)
+    if user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create user
+    # user = await crud_user.create(db=db, obj_in=user_in)
+    user = await run_in_threadpool(crud_user.create, db, user_in)
+    
+    # Generate verification token
+    verification_token = generate_verification_token(user_id=user.id)
+    
+    # Update user with verification token
+    user_update = UserUpdate(verification_token=verification_token)
+    user = await crud_user.update(db=db, db_obj=user, obj_in=user_update)
+    
+    # Send verification email
+    background_tasks.add_task(
+        send_verification_email,
+        email=user.email,
+        verification_token=verification_token
+    )
+    
+    return user
+
+@router.get("/me", response_model=UserResponse)
+async def read_user_me(
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get current user"""
+    return current_user
+
+@router.put("/me", response_model=UserResponse)
+async def update_user_me(
+    user_in: UserUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update current user"""
+    return await crud_user.update(db=db, db_obj=current_user, obj_in=user_in)
+
+@router.post("/verify-email")
+async def verify_email(
+    token: str,
+    db: Session = Depends(get_db)
+):
+    """Verify user's email address using verification token"""
+    user_id = verify_verification_token(token)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token"
+        )
+    
+    user = await crud_user.get(db=db, id=user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    user_update = UserUpdate(
+        is_verified=True,
+        verification_token=None
+    )
+    await crud_user.update(db=db, db_obj=user, obj_in=user_update)
+    
+    return {"message": "Email successfully verified"}
+
+@router.post("/send-verification")
+async def send_verification(
+    background_tasks: BackgroundTasks,
+    current_user: UserResponse = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Send a new verification email to current user"""
+    if current_user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already verified"
+        )
+    
+    verification_token = generate_verification_token(current_user.id)
+    user_update = UserUpdate(verification_token=verification_token)
+    await crud_user.update(db=db, db_obj=current_user, obj_in=user_update)
+    
+    background_tasks.add_task(
+        send_verification_email,
+        email=current_user.email,
+        token=verification_token
+    )
+    
+    return {"message": "Verification email sent"}
+
+@router.post("/forgot-password")
+async def forgot_password(
+    email: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Initiate password reset process"""
+    # user = await crud_user.get_by_email(db=db, email=email)
+    user = await run_in_threadpool(crud_user.get_by_email, db, email=email)
+    if not user:
+        # Don't reveal if email exists
+        return {"message": "If email exists, password reset instructions will be sent"}
+    
+    reset_token = await crud_password_reset.create_reset_token(
+        db=db,
+        user_id=user.id
+    )
+    
+    background_tasks.add_task(
+        send_password_reset_email,
+        email=user.email,
+        token=reset_token.token
+    )
+    
+    return {"message": "If email exists, password reset instructions will be sent"}
+
+@router.post("/reset-password")
+async def reset_password(
+    token: str,
+    new_password: str,
+    db: Session = Depends(get_db)
+):
+    """Reset password using reset token"""
+    reset_token = await crud_password_reset.get_valid_token(
+        db=db,
+        token=token
+    )
+    if not reset_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+    
+    user = await crud_user.get(db=db, id=reset_token.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    user_update = UserUpdate(
+        hashed_password=get_password_hash(new_password)
+    )
+    await crud_user.update(db=db, db_obj=user, obj_in=user_update)
+    await crud_password_reset.mark_used(db=db, db_obj=reset_token)
+    
+    return {"message": "Password successfully reset"}
+
+@router.post("/change-password")
+async def change_password(
+    current_password: str,
+    new_password: str,
+    current_user: UserResponse = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Change password for authenticated user"""
+    if not verify_password(current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect password"
+        )
+    
+    user_update = UserUpdate(
+        hashed_password=get_password_hash(new_password)
+    )
+    await crud_user.update(db=db, db_obj=current_user, obj_in=user_update)
+    
+    return {"message": "Password successfully changed"}
+
+# File: backend/app/api/v1/endpoints/job/activity.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from datetime import datetime
+from app.crud.jobsystem.activity import crud_activity
+from app.schemas.jobsystem.activity import (
+    ActivityResponse as Activity, ActivityCreate, ActivityUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Activity)
+async def create_activity(
+    report_in: ActivityCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new daily report"""
+    return await crud_activity.create(db=db, obj_in=report_in)
+
+@router.get("/wellbore/{job_id}", response_model=List[Activity])
+async def get_wellbore_reports(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all daily reports for a wellbore"""
+    return await crud_activity.get_by_wellbore(db=db, job_id=job_id)
+
+@router.get("/wellbore/{wellbore_id}/date-range", response_model=List[Activity])
+async def get_reports_by_date(
+    job_id: str,
+    start_date: datetime,
+    end_date: datetime,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get daily reports within date range"""
+    return await crud_activity.get_by_date_range(
+        db=db,
+        wellbore_id=job_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+@router.put("/{activity_id}", response_model=Activity)
+async def update_activity(
+    activity_id: str,
+    activity_in: ActivityUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update daily report"""
+    activity = await crud_activity.get(db=db, id=activity_id)
+    if not activity:
+        raise HTTPException(status_code=404, detail="Daily report not found")
+    return await crud_activity.update(db=db, db_obj=activity, obj_in=activity_in)
+
+# File: backend/app/api/v1/endpoints/job/contract_type.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.contract_type import crud_contract_type
+from app.schemas.jobsystem.contract_type import (
+    ContractTypeResponse as ContractType, ContractTypeCreate, ContractTypeUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=ContractType)
+async def create_contract_type(
+    contract_type_in: ContractTypeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new contract type"""
+    return await crud_contract_type.create(db=db, obj_in=contract_type_in)
+
+@router.get("/type/{contract_type}", response_model=ContractType)
+async def get_contract_type(
+    contract_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get contract type by name"""
+    contract = await crud_contract_type.get_by_type(db=db, contract_type=contract_type)
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract type not found")
+    return contract
+
+@router.put("/{type_id}", response_model=ContractType)
+async def update_contract_type(
+    type_id: str,
+    contract_type_in: ContractTypeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update contract type"""
+    contract_type = await crud_contract_type.get(db=db, id=type_id)
+    if not contract_type:
+        raise HTTPException(status_code=404, detail="Contract type not found")
+    return await crud_contract_type.update(db=db, db_obj=contract_type, obj_in=contract_type_in)
+
+# File: backend/app/api/v1/endpoints/job/daily_report.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from datetime import datetime
+from app.crud.jobsystem.daily_report import crud_daily_report
+from app.schemas.jobsystem.daily_report import (
+    DailyReportResponse as DailyReport, DailyReportCreate, DailyReportUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=DailyReport)
+async def create_daily_report(
+    report_in: DailyReportCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new daily report"""
+    return await crud_daily_report.create(db=db, obj_in=report_in)
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[DailyReport])
+async def get_wellbore_reports(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all daily reports for a wellbore"""
+    return await crud_daily_report.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.get("/wellbore/{wellbore_id}/date-range", response_model=List[DailyReport])
+async def get_reports_by_date(
+    wellbore_id: str,
+    start_date: datetime,
+    end_date: datetime,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get daily reports within date range"""
+    return await crud_daily_report.get_by_date_range(
+        db=db,
+        wellbore_id=wellbore_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+@router.put("/{report_id}", response_model=DailyReport)
+async def update_daily_report(
+    report_id: str,
+    report_in: DailyReportUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update daily report"""
+    report = await crud_daily_report.get(db=db, id=report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Daily report not found")
+    return await crud_daily_report.update(db=db, db_obj=report, obj_in=report_in)
+
+
+# File: backend/app/api/v1/endpoints/field/field.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.field import crud_field
+from app.schemas.jobsystem.field import FieldResponse as Field, FieldCreate, FieldUpdate
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Field)
+async def create_field(
+    field_in: FieldCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new field"""
+    return await crud_field.create(db=db, obj_in=field_in)
+
+@router.get("/name/{field_name}", response_model=Field)
+async def get_field_by_name(
+    field_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get field by name"""
+    field = await crud_field.get_by_name(db=db, field_name=field_name)
+    if not field:
+        raise HTTPException(status_code=404, detail="Field not found")
+    return field
+
+@router.get("/country/{country}", response_model=List[Field])
+async def get_fields_by_country(
+    country: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all fields in a country"""
+    return await crud_field.get_fields_by_country(db=db, country=country)
+
+@router.get("/area/{area}", response_model=List[Field])
+async def get_fields_by_area(
+    area: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all fields in an area"""
+    return await crud_field.get_fields_by_area(db=db, area=area)
+
+@router.put("/{field_id}", response_model=Field)
+async def update_field(
+    field_id: str,
+    field_in: FieldUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update field"""
+    field = await crud_field.get(db=db, id=field_id)
+    if not field:
+        raise HTTPException(status_code=404, detail="Field not found")
+    return await crud_field.update(db=db, db_obj=field, obj_in=field_in)
+
+# File: backend/app/api/v1/endpoints/wellbore/fluid.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.fluid import crud_fluid
+from app.schemas.jobsystem.fluid import FluidResponse as Fluid, FluidCreate, FluidUpdate
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Fluid)
+async def create_fluid(
+    fluid_in: FluidCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new fluid"""
+    return await crud_fluid.create(db=db, obj_in=fluid_in)
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[Fluid])
+async def get_fluids_by_wellbore(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all fluids for a wellbore"""
+    return await crud_fluid.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.get("/wellbore/{wellbore_id}/type/{fluid_type}", response_model=List[Fluid])
+async def get_fluids_by_type(
+    wellbore_id: str,
+    fluid_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get fluids by type for a wellbore"""
+    return await crud_fluid.get_by_type(
+        db=db,
+        wellbore_id=wellbore_id,
+        fluid_type=fluid_type
+    )
+
+@router.put("/{fluid_id}", response_model=Fluid)
+async def update_fluid(
+    fluid_id: str,
+    fluid_in: FluidUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update fluid"""
+    fluid = await crud_fluid.get(db=db, id=fluid_id)
+    if not fluid:
+        raise HTTPException(status_code=404, detail="Fluid not found")
+    return await crud_fluid.update(db=db, db_obj=fluid, obj_in=fluid_in)
+
+# File: backend/app/api/v1/endpoints/wellbore/hanger_info.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.crud.jobsystem.hanger_info import crud_hanger_info
+from app.schemas.jobsystem.hanger_info import (
+    HangerInfoResponse as HangerInfo,
+    HangerInfoCreate,
+    HangerInfoUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=HangerInfo)
+async def create_hanger_info(
+    hanger_in: HangerInfoCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new hanger info"""
+    try:
+        return await crud_hanger_info.create(db=db, obj_in=hanger_in)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error creating hanger info: {str(e)}"
+        )
+
+@router.get("/", response_model=List[HangerInfo])
+async def get_all_hangers(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all hanger info with pagination"""
+    return await crud_hanger_info.get_multi(db=db, skip=skip, limit=limit)
+
+@router.get("/{hanger_id}", response_model=HangerInfo)
+async def get_hanger_info(
+    hanger_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get hanger info by ID"""
+    hanger = await crud_hanger_info.get(db=db, id=hanger_id)
+    if not hanger:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hanger info not found"
+        )
+    return hanger
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[HangerInfo])
+async def get_hangers_by_wellbore(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all hanger info for a wellbore"""
+    return await crud_hanger_info.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.get("/wellbore/{wellbore_id}/type/{hanger_type}", response_model=Optional[HangerInfo])
+async def get_hanger_by_type(
+    wellbore_id: str,
+    hanger_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get hanger info by type for a wellbore"""
+    hanger = await crud_hanger_info.get_by_type(
+        db=db,
+        wellbore_id=wellbore_id,
+        hanger_type=hanger_type
+    )
+    if not hanger:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No hanger info found for type {hanger_type} in wellbore {wellbore_id}"
+        )
+    return hanger
+
+@router.put("/{hanger_id}", response_model=HangerInfo)
+async def update_hanger_info(
+    hanger_id: str,
+    hanger_in: HangerInfoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update hanger info"""
+    hanger = await crud_hanger_info.get(db=db, id=hanger_id)
+    if not hanger:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hanger info not found"
+        )
+    try:
+        return await crud_hanger_info.update(db=db, db_obj=hanger, obj_in=hanger_in)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error updating hanger info: {str(e)}"
+        )
+
+@router.delete("/{hanger_id}")
+async def delete_hanger_info(
+    hanger_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete hanger info"""
+    hanger = await crud_hanger_info.get(db=db, id=hanger_id)
+    if not hanger:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hanger info not found"
+        )
+    try:
+        await crud_hanger_info.remove(db=db, id=hanger_id)
+        return {"message": "Hanger info deleted successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error deleting hanger info: {str(e)}"
+        )
+
+@router.get("/{hanger_id}/specifications")
+async def get_hanger_specifications(
+    hanger_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed specifications for a hanger"""
+    hanger = await crud_hanger_info.get(db=db, id=hanger_id)
+    if not hanger:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hanger info not found"
+        )
+    
+    return {
+        "basic_info": {
+            "type": hanger.type,
+            "wellbore_id": hanger.wellbore_id
+        },
+        "ratings": {
+            "burst_rating": hanger.burst_rating,
+            "tensile_rating": hanger.tensile_rating,
+            "hanging_capacity": hanger.hanging_capacity
+        },
+        "settings": {
+            "hydraulic_setting_pressure": hanger.hydraulic_setting_pressure
+        }
+    }
+
+# File: backend/app/api/v1/endpoints/installation/installation_type.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.crud.jobsystem.installation_type import crud_installation_type
+from app.schemas.jobsystem.installation_type import (
+    InstallationTypeResponse as InstallationType, 
+    InstallationTypeCreate, 
+    InstallationTypeUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=InstallationType)
+async def create_installation_type(
+    type_in: InstallationTypeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new installation type"""
+    return await crud_installation_type.create(db=db, obj_in=type_in)
+
+@router.get("/type/{installation_type}", response_model=InstallationType)
+async def get_installation_type(
+    installation_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get installation type by name"""
+    type_obj = await crud_installation_type.get_by_type(
+        db=db,
+        installation_type=installation_type
+    )
+    if not type_obj:
+        raise HTTPException(status_code=404, detail="Installation type not found")
+    return type_obj
+
+@router.put("/{type_id}", response_model=InstallationType)
+async def update_installation_type(
+    type_id: str,
+    type_in: InstallationTypeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update installation type"""
+    type_obj = await crud_installation_type.get(db=db, id=type_id)
+    if not type_obj:
+        raise HTTPException(status_code=404, detail="Installation type not found")
+    return await crud_installation_type.update(db=db, db_obj=type_obj, obj_in=type_in)
+
+# File: backend/app/api/v1/endpoints/installation/installation.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.installation import crud_installation
+from app.schemas.jobsystem.installation import (
+    InstallationResponse as Installation, InstallationCreate, InstallationUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Installation)
+async def create_installation(
+    installation_in: InstallationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new installation"""
+    return await crud_installation.create(db=db, obj_in=installation_in)
+
+@router.get("/field/{field_id}", response_model=List[Installation])
+async def get_installations_by_field(
+    field_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all installations in a field"""
+    return await crud_installation.get_by_field(db=db, field_id=field_id)
+
+@router.get("/name/{installation_name}", response_model=Installation)
+async def get_installation_by_name(
+    installation_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get installation by name"""
+    installation = await crud_installation.get_by_name(db=db, installation_name=installation_name)
+    if not installation:
+        raise HTTPException(status_code=404, detail="Installation not found")
+    return installation
+
+@router.get("/type/{type_id}", response_model=List[Installation])
+async def get_installations_by_type(
+    type_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get installations by type"""
+    return await crud_installation.get_by_type(db=db, installation_type_id=type_id)
+
+@router.put("/{installation_id}", response_model=Installation)
+async def update_installation(
+    installation_id: str,
+    installation_in: InstallationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update installation"""
+    installation = await crud_installation.get(db=db, id=installation_id)
+    if not installation:
+        raise HTTPException(status_code=404, detail="Installation not found")
+    return await crud_installation.update(db=db, db_obj=installation, obj_in=installation_in)
+
+# File: backend/app/api/v1/endpoints/job/job_center.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.crud.jobsystem.job_center import crud_job_center
+from app.schemas.jobsystem.job_center import JobCenterResponse as JobCenter, JobCenterCreate, JobCenterUpdate
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=JobCenter)
+async def create_job_center(
+    center_in: JobCenterCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new job center"""
+    return await crud_job_center.create(db=db, obj_in=center_in)
+
+@router.get("/well/{well_name}", response_model=JobCenter)
+async def get_job_center_by_well(
+    well_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get job center by well name"""
+    center = await crud_job_center.get_by_well_name(db=db, well_name=well_name)
+    if not center:
+        raise HTTPException(status_code=404, detail="Job center not found")
+    return center
+
+@router.get("/short/{short_name}", response_model=JobCenter)
+async def get_job_center_by_short_name(
+    short_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get job center by short name"""
+    center = await crud_job_center.get_by_short_name(db=db, short_name=short_name)
+    if not center:
+        raise HTTPException(status_code=404, detail="Job center not found")
+    return center
+
+@router.get("/active", response_model=List[JobCenter])
+async def get_active_job_centers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all active job centers"""
+    return await crud_job_center.get_active_job_centers(db=db)
+
+@router.put("/{center_id}", response_model=JobCenter)
+async def update_job_center(
+    center_id: str,
+    center_in: JobCenterUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update job center"""
+    center = await crud_job_center.get(db=db, id=center_id)
+    if not center:
+        raise HTTPException(status_code=404, detail="Job center not found")
+    return await crud_job_center.update(db=db, db_obj=center, obj_in=center_in)
+
+
+# In job_center.py
+@router.get("/", response_model=List[JobCenter])
+async def get_job_centers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 100
+):
+    """Get all job centers"""
+    return await crud_job_center.get_multi(db=db, skip=skip, limit=limit)
+
+
+# Add exports
+__all__ = ['router']
+
+
+# File: backend/app/api/v1/endpoints/wellbore/job_parameter.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.job_parameter import crud_job_parameter
+from app.schemas.jobsystem.job_parameter import (
+    JobParameterResponse as JobParameter, JobParameterCreate, JobParameterUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=JobParameter)
+async def create_job_parameter(
+    *,
+    db: Session = Depends(get_db),
+    param_in: JobParameterCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new run parameter"""
+    return await crud_job_parameter.create(db=db, obj_in=param_in)
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[JobParameter])
+async def get_parameters_by_wellbore(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all run parameters for a wellbore"""
+    return await crud_job_parameter.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.put("/{param_id}", response_model=JobParameter)
+async def update_job_parameter(
+    *,
+    db: Session = Depends(get_db),
+    param_id: str,
+    param_in: JobParameterUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update run parameter"""
+    param = await crud_job_parameter.get(db=db, id=param_id)
+    if not param:
+        raise HTTPException(status_code=404, detail="Run parameter not found")
+    return await crud_job_parameter.update(db=db, db_obj=param, obj_in=param_in)
+
+# File: backend/app/api/api_v1/endpoints/job/job.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.job import crud_job
+from app.schemas.jobsystem.job import JobResponse, JobCreate, JobUpdate, JobView
+from app.core.deps import get_db
+
+router = APIRouter()
+
+@router.post("/", response_model=JobResponse)
+async def create_job(
+    job_in: JobCreate,
+    db: Session = Depends(get_db)
+):
+    """Create new job"""
+    return await crud_job.create(db=db, obj_in=job_in)
+
+@router.get("/", response_model=List[JobView])
+async def read_jobs(
+    skip: int = 0,
+    limit: int = 100,
+    sort_field: str = "created_at",
+    sort_order: str = "desc",
+    status: str = None,
+    search_term: str = None,
+    db: Session = Depends(get_db)
+):
+    """Get all jobs with optional filters"""
+    filters = {
+        "sort_field": sort_field,
+        "sort_order": sort_order,
+        "status": status,
+        "search_term": search_term
+    }
+    jobs = await crud_job.get_multi(db, skip=skip, limit=limit, filters=filters)
+    if not jobs:
+        raise HTTPException(status_code=404, detail="No jobs found")
+    return jobs
+
+@router.get("/active", response_model=List[JobResponse])
+async def read_active_jobs(
+    db: Session = Depends(get_db)
+):
+    """Get active jobs"""
+    return await crud_job.get_active_jobs(db=db)
+
+@router.get("/{job_id}", response_model=JobView)
+async def read_job(
+    job_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get job by ID"""
+    job = await crud_job.get(db=db, id=job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+@router.put("/{job_id}", response_model=JobResponse)
+async def update_job(
+    job_id: str,
+    job_in: JobUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update job"""
+    job = await crud_job.get(db=db, id=job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return await crud_job.update(db=db, db_obj=job, obj_in=job_in)
+# File: backend/app/api/v1/endpoints/job/mud_equipment_detail.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.mud_equipment_detail import crud_mud_equipment_detail
+from app.models.authsystem.user import User
+from app.schemas.jobsystem.mud_equipment_detail import (
+    MudEquipmentDetailResponse, MudEquipmentDetailCreate, MudEquipmentDetailUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse
+
+router = APIRouter()
+
+@router.post("/", response_model=MudEquipmentDetailResponse)
+async def create_mud_equipment(
+    *,
+    db: Session = Depends(get_db),
+    equipment_in: MudEquipmentDetailCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new mud equipment detail"""
+    return await crud_mud_equipment_detail.create(db=db, obj_in=equipment_in)
+
+@router.get("/report/{report_id}", response_model=List[MudEquipmentDetailResponse])
+async def get_equipment_by_report(
+    report_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all mud equipment details for a report"""
+    return await crud_mud_equipment_detail.get_by_report(db=db, report_id=report_id)
+
+@router.put("/{equipment_id}", response_model=MudEquipmentDetailResponse)
+async def update_mud_equipment(
+    *,
+    db: Session = Depends(get_db),
+    equipment_id: str,
+    equipment_in: MudEquipmentDetailUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update mud equipment detail"""
+    equipment = await crud_mud_equipment_detail.get(db=db, id=equipment_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Mud equipment not found")
+    return await crud_mud_equipment_detail.update(db=db, db_obj=equipment, obj_in=equipment_in)
+
+# File: backend/app/api/v1/endpoints/job/mud_pump_detail.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.mud_pump_detail import crud_mud_pump_detail
+from app.schemas.jobsystem.mud_pump_detail import (
+    MudPumpDetailResponse, MudPumpDetailCreate, MudPumpDetailUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=MudPumpDetailResponse)
+async def create_mud_pump(
+    *,
+    db: Session = Depends(get_db),
+    pump_in: MudPumpDetailCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new mud pump detail"""
+    return await crud_mud_pump_detail.create(db=db, obj_in=pump_in)
+
+@router.get("/report/{report_id}", response_model=List[MudPumpDetailResponse])
+async def get_pumps_by_report(
+    report_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all mud pump details for a report"""
+    return await crud_mud_pump_detail.get_by_report(db=db, report_id=report_id)
+
+@router.get("/report/{report_id}/active", response_model=List[MudPumpDetailResponse])
+async def get_active_pumps(
+    report_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get active mud pumps for a report"""
+    return await crud_mud_pump_detail.get_active_pumps(db=db, report_id=report_id)
+
+@router.put("/{pump_id}", response_model=MudPumpDetailResponse)
+async def update_mud_pump(
+    *,
+    db: Session = Depends(get_db),
+    pump_id: str,
+    pump_in: MudPumpDetailUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update mud pump detail"""
+    pump = await crud_mud_pump_detail.get(db=db, id=pump_id)
+    if not pump:
+        raise HTTPException(status_code=404, detail="Mud pump not found")
+    return await crud_mud_pump_detail.update(db=db, db_obj=pump, obj_in=pump_in)
+
+# File: backend/app/api/v1/endpoints/operations/operational_parameter.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.operational_parameter import crud_operational_parameter
+from app.schemas.jobsystem.operational_parameter import (
+    OperationalParameterResponse as OperationalParameter,
+    OperationalParameterCreate,
+    OperationalParameterUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=OperationalParameter)
+async def create_operational_parameter(
+    *,
+    db: Session = Depends(get_db),
+    param_in: OperationalParameterCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new operational parameter"""
+    return await crud_operational_parameter.create(db=db, obj_in=param_in)
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[OperationalParameter])
+async def get_parameters_by_wellbore(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all operational parameters for a wellbore"""
+    return await crud_operational_parameter.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.get("/wellbore/{wellbore_id}/zone/{zone}", response_model=OperationalParameter)
+async def get_parameters_by_zone(
+    wellbore_id: str,
+    zone: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get operational parameters for a specific zone"""
+    param = await crud_operational_parameter.get_by_zone(db=db, wellbore_id=wellbore_id, zone=zone)
+    if not param:
+        raise HTTPException(status_code=404, detail="Parameters not found")
+    return param
+
+# File: backend/app/api/v1/endpoints/operations/operator.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.operator import crud_operator
+from app.schemas.jobsystem.operator import (OperatorResponse as Operator, 
+                                            OperatorCreate, OperatorUpdate)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Operator)
+async def create_operator(
+    *,
+    db: Session = Depends(get_db),
+    operator_in: OperatorCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new operator"""
+    return await crud_operator.create(db=db, obj_in=operator_in)
+
+@router.get("/code/{company_code}", response_model=Operator)
+async def get_operator_by_code(
+    company_code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get operator by company code"""
+    operator = await crud_operator.get_by_company_code(db=db, company_code=company_code)
+    if not operator:
+        raise HTTPException(status_code=404, detail="Operator not found")
+    return operator
+
+@router.get("/name/{operator_name}", response_model=Operator)
+async def get_operator_by_name(
+    operator_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get operator by name"""
+    operator = await crud_operator.get_by_name(db=db, operator_name=operator_name)
+    if not operator:
+        raise HTTPException(status_code=404, detail="Operator not found")
+    return operator
+
+@router.put("/{operator_id}", response_model=Operator)
+async def update_operator(
+    *,
+    db: Session = Depends(get_db),
+    operator_id: str,
+    operator_in: OperatorUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update operator"""
+    operator = await crud_operator.get(db=db, id=operator_id)
+    if not operator:
+        raise HTTPException(status_code=404, detail="Operator not found")
+    return await crud_operator.update(db=db, db_obj=operator, obj_in=operator_in)
+
+# In operator.py
+@router.get("/", response_model=List[Operator])
+async def get_operators(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 100
+):
+    """Get all operators"""
+    return await crud_operator.get_multi(db=db, skip=skip, limit=limit)
+
+# File: backend/app/api/v1/endpoints/wellbore/physical_barrier.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.physical_barrier import crud_physical_barrier
+from app.schemas.jobsystem.physical_barrier import (
+    PhysicalBarrierResponse as PhysicalBarrier,
+    PhysicalBarrierCreate,
+    PhysicalBarrierUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=PhysicalBarrier)
+async def create_barrier(
+    *,
+    db: Session = Depends(get_db),
+    barrier_in: PhysicalBarrierCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new physical barrier"""
+    return await crud_physical_barrier.create(db=db, obj_in=barrier_in)
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[PhysicalBarrier])
+async def get_barriers_by_wellbore(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all physical barriers for a wellbore"""
+    return await crud_physical_barrier.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.get("/wellbore/{wellbore_id}/verified", response_model=List[PhysicalBarrier])
+async def get_verified_barriers(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get verified barriers for a wellbore"""
+    return await crud_physical_barrier.get_verified_barriers(db=db, wellbore_id=wellbore_id)
+
+@router.post("/{barrier_id}/verify")
+async def verify_barrier(
+    *,
+    db: Session = Depends(get_db),
+    barrier_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Mark a barrier as verified"""
+    barrier = await crud_physical_barrier.mark_verified(
+        db=db,
+        barrier_id=barrier_id,
+        verified_by=current_user.id
+    )
+    if not barrier:
+        raise HTTPException(status_code=404, detail="Barrier not found")
+    return {"message": "Barrier verified successfully"}
+
+# File: backend/app/api/v1/endpoints/operations/production.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.production import crud_production
+from app.schemas.jobsystem.production import (ProductionResponse as Production, 
+                                              ProductionCreate, ProductionUpdate)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Production)
+async def create_production(
+    *,
+    db: Session = Depends(get_db),
+    production_in: ProductionCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new production record"""
+    return await crud_production.create(db=db, obj_in=production_in)
+
+@router.get("/type/{production_type}", response_model=List[Production])
+async def get_production_by_type(
+    production_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all productions of a specific type"""
+    return await crud_production.get_by_type(db=db, type_value=production_type, type_field="production_type")
+
+@router.put("/{production_id}", response_model=Production)
+async def update_production(
+    *,
+    db: Session = Depends(get_db),
+    production_id: str,
+    production_in: ProductionUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update production record"""
+    production = await crud_production.get(db=db, id=production_id)
+    if not production:
+        raise HTTPException(status_code=404, detail="Production record not found")
+    return await crud_production.update(db=db, db_obj=production, obj_in=production_in)
+
+# File: backend/app/api/v1/endpoints/wellbore/seal_assembly.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.seal_assembly import crud_seal_assembly
+from app.schemas.jobsystem.seal_assembly import (
+    SealAssemblyResponse as SealAssembly, SealAssemblyCreate, SealAssemblyUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=SealAssembly)
+async def create_seal_assembly(
+    *,
+    db: Session = Depends(get_db),
+    assembly_in: SealAssemblyCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new seal assembly"""
+    return await crud_seal_assembly.create(db=db, obj_in=assembly_in)
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[SealAssembly])
+async def get_assemblies_by_wellbore(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all seal assemblies for a wellbore"""
+    return await crud_seal_assembly.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.put("/{assembly_id}", response_model=SealAssembly)
+async def update_seal_assembly(
+    *,
+    db: Session = Depends(get_db),
+    assembly_id: str,
+    assembly_in: SealAssemblyUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update seal assembly"""
+    assembly = await crud_seal_assembly.get(db=db, id=assembly_id)
+    if not assembly:
+        raise HTTPException(status_code=404, detail="Seal assembly not found")
+    return await crud_seal_assembly.update(db=db, db_obj=assembly, obj_in=assembly_in)
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import Any, Dict
+import logging
+
+from app.api import deps
+from app.models.authsystem.user import User
+from app.schemas.jobsystem.settings import UserSetting, UserSettingCreate, UserSettingUpdate
+from app.crud.jobsystem.settings import crud_user_setting
+from app.core.constants import REGION_PRESETS
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+@router.get("/", response_model=Dict[str, Any])
+async def get_settings(
+    current_user: User = Depends(deps.get_current_user),
+    db: Session = Depends(deps.get_db)
+) -> Any:
+    """Get user settings"""
+    try:
+        logger.info(f"Fetching settings for user {current_user.id}")
+        settings = await crud_user_setting.get_by_user(
+            db, user_id=current_user.id
+        )
+        
+        if not settings:
+            logger.info(f"No settings found for user {current_user.id}, creating default")
+            default_settings = UserSettingCreate(
+                unit_system="US",
+                unit_preferences=REGION_PRESETS["US"],
+                display_settings={
+                    "decimalPlaces": {
+                        "length": 2,
+                        "pressure": 1,
+                        "temperature": 1,
+                        "weight": 1,
+                        "volume": 1,
+                        "density": 2,
+                        "torque": 0
+                    },
+                    "fontSize": "medium",
+                    "darkMode": False,
+                    "highContrast": False
+                }
+            )
+            settings = await crud_user_setting.create(
+                db, obj_in=default_settings
+            )
+        
+        # Return in the format expected by the frontend
+        return {
+            "unit_system": settings.unit_system,
+            "unit_preferences": settings.unit_preferences,
+            "display_settings": settings.display_settings
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching settings: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+@router.put("/", response_model=Dict[str, Any])
+async def update_settings(
+    *,
+    settings_in: UserSettingUpdate,
+    current_user: User = Depends(deps.get_current_user),
+    db: Session = Depends(deps.get_db)
+) -> Any:
+    """Update user settings"""
+    try:
+        settings = await crud_user_setting.get_by_user(db, user_id=current_user.id)
+        if not settings:
+            settings = await crud_user_setting.create(
+                db, 
+                obj_in=UserSettingCreate(
+                    user_id=current_user.id,
+                    **settings_in.dict()
+                )
+            )
+        else:
+            settings = await crud_user_setting.update(
+                db,
+                db_obj=settings,
+                obj_in=settings_in
+            )
+            
+        # Return in the format expected by the frontend
+        return {
+            "unit_system": settings.unit_system,
+            "unit_preferences": settings.unit_preferences,
+            "display_settings": settings.display_settings
+        }
+    except Exception as e:
+        logger.error(f"Error updating settings: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+@router.post("/reset", response_model=Dict[str, Any])
+async def reset_settings(
+    current_user: User = Depends(deps.get_current_user),
+    db: Session = Depends(deps.get_db)
+) -> Any:
+    """Reset user settings to defaults"""
+    try:
+        default_settings = UserSettingCreate(
+            unit_system="US",
+            unit_preferences=REGION_PRESETS["US"],
+            display_settings={
+                "decimalPlaces": {
+                    "length": 2,
+                    "pressure": 1,
+                    "temperature": 1,
+                    "weight": 1,
+                    "volume": 1,
+                    "density": 2,
+                    "torque": 0
+                },
+                "fontSize": "medium",
+                "darkMode": False,
+                "highContrast": False
+            }
+        )
+        
+        settings = await crud_user_setting.get_by_user(db, user_id=current_user.id)
+        if settings:
+            settings = await crud_user_setting.update(
+                db,
+                db_obj=settings,
+                obj_in=default_settings
+            )
+        else:
+            settings = await crud_user_setting.create(
+                db, 
+                obj_in=default_settings
+            )
+            
+        return {
+            "unit_system": settings.unit_system,
+            "unit_preferences": settings.unit_preferences,
+            "display_settings": settings.display_settings
+        }
+    except Exception as e:
+        logger.error(f"Error resetting settings: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+# File: backend/app/api/v1/endpoints/installation/slot.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Dict
+from app.crud.jobsystem.slot import crud_slot
+from app.schemas.jobsystem.slot import SlotResponse as Slot, SlotCreate, SlotUpdate
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Slot)
+async def create_slot(
+    *,
+    db: Session = Depends(get_db),
+    slot_in: SlotCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new slot"""
+    return await crud_slot.create(db=db, obj_in=slot_in)
+
+@router.post("/batch", response_model=List[Slot])
+async def batch_create_slots(
+    *,
+    db: Session = Depends(get_db),
+    installation_id: str,
+    slot_names: List[str],
+    current_user: User = Depends(get_current_user)
+):
+    """Batch create multiple slots"""
+    return await crud_slot.batch_create_slots(
+        db=db,
+        installation_id=installation_id,
+        slot_names=slot_names
+    )
+
+@router.get("/installation/{installation_id}", response_model=List[Slot])
+async def get_slots_by_installation(
+    installation_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all slots for an installation"""
+    return await crud_slot.get_by_installation(db=db, installation_id=installation_id)
+
+@router.get("/installation/{installation_id}/available", response_model=List[Slot])
+async def get_available_slots(
+    installation_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get available slots for an installation"""
+    return await crud_slot.get_available_slots(db=db, installation_id=installation_id)
+
+@router.get("/installation/{installation_id}/with-wells", response_model=List[Slot])
+async def get_slots_with_wells(
+    installation_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get slots that have wells"""
+    return await crud_slot.get_slots_with_wells(db=db, installation_id=installation_id)
+
+@router.get("/installation/{installation_id}/statistics", response_model=Dict)
+async def get_slot_statistics(
+    installation_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get slot statistics for an installation"""
+    return await crud_slot.get_slot_statistics(db=db, installation_id=installation_id)
+
+@router.get("/coordinates", response_model=List[Slot])
+async def get_slots_by_coordinates(
+    min_eastings: float,
+    max_eastings: float,
+    min_northings: float,
+    max_northings: float,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get slots within coordinate boundaries"""
+    return await crud_slot.get_slots_by_coordinates(
+        db=db,
+        min_eastings=min_eastings,
+        max_eastings=max_eastings,
+        min_northings=min_northings,
+        max_northings=max_northings
+    )
+
+@router.put("/{slot_id}/coordinates")
+async def update_slot_coordinates(
+    *,
+    db: Session = Depends(get_db),
+    slot_id: str,
+    utm_eastings: float = None,
+    utm_northings: float = None,
+    latitude: str = None,
+    longitude: str = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Update slot coordinates"""
+    slot = await crud_slot.update_coordinates(
+        db=db,
+        slot_id=slot_id,
+        utm_eastings=utm_eastings,
+        utm_northings=utm_northings,
+        latitude=latitude,
+        longitude=longitude
+    )
+    if not slot:
+        raise HTTPException(status_code=404, detail="Slot not found")
+    return slot
+
+# File: backend/app/api/v1/endpoints/tally/tally_item.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.tally_item import crud_tally_item
+from app.schemas.jobsystem.tally_item import TallyItemResponse as TallyItem, TallyItemCreate, TallyItemUpdate
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=TallyItem)
+async def create_tally_item(
+    *,
+    db: Session = Depends(get_db),
+    item_in: TallyItemCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new tally item"""
+    return await crud_tally_item.create(db=db, obj_in=item_in)
+
+@router.get("/tally/{tally_id}", response_model=List[TallyItem])
+async def get_items_by_tally(
+    tally_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all items for a tally"""
+    return await crud_tally_item.get_by_tally(db=db, tally_id=tally_id)
+
+@router.get("/serial/{serial_number}", response_model=TallyItem)
+async def get_item_by_serial(
+    serial_number: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get item by serial number"""
+    item = await crud_tally_item.get_by_serial_number(db=db, serial_number=serial_number)
+    if not item:
+        raise HTTPException(status_code=404, detail="Tally item not found")
+    return item
+
+@router.get("/tally/{tally_id}/total-length")
+async def calculate_total_length(
+    tally_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Calculate total length of tally items"""
+    total_length = await crud_tally_item.calculate_total_length(db=db, tally_id=tally_id)
+    return {"total_length": total_length}
+
+@router.put("/{item_id}", response_model=TallyItem)
+async def update_tally_item(
+    *,
+    db: Session = Depends(get_db),
+    item_id: str,
+    item_in: TallyItemUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update tally item"""
+    item = await crud_tally_item.get(db=db, id=item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Tally item not found")
+    return await crud_tally_item.update(db=db, db_obj=item, obj_in=item_in)
+
+# File: backend/app/api/v1/endpoints/tally/tally.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.tally import crud_tally
+from app.schemas.jobsystem.tally import TallyResponse as Tally, TallyCreate, TallyUpdate
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Tally)
+async def create_tally(
+    *,
+    db: Session = Depends(get_db),
+    tally_in: TallyCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new tally"""
+    return await crud_tally.create(db=db, obj_in=tally_in)
+
+@router.get("/{tally_id}", response_model=Tally)
+async def get_tally(
+    tally_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get tally by ID"""
+    tally = await crud_tally.get(db=db, id=tally_id)
+    if not tally:
+        raise HTTPException(status_code=404, detail="Tally not found")
+    return tally
+
+@router.put("/{tally_id}", response_model=Tally)
+async def update_tally(
+    *,
+    db: Session = Depends(get_db),
+    tally_id: str,
+    tally_in: TallyUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update tally"""
+    tally = await crud_tally.get(db=db, id=tally_id)
+    if not tally:
+        raise HTTPException(status_code=404, detail="Tally not found")
+    return await crud_tally.update(db=db, db_obj=tally, obj_in=tally_in)
+# File: backend/app/api/v1/endpoints/timesheet/time_sheet.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from datetime import datetime
+from app.crud.jobsystem.time_sheet import crud_time_sheet
+from app.schemas.jobsystem.time_sheet import TimeSheetResponse as TimeSheet, TimeSheetCreate, TimeSheetUpdate
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=TimeSheet)
+async def create_time_sheet(
+    *,
+    db: Session = Depends(get_db),
+    timesheet_in: TimeSheetCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new time sheet"""
+    return await crud_time_sheet.create(db=db, obj_in=timesheet_in)
+
+@router.get("/job/{job_id}", response_model=List[TimeSheet])
+async def get_time_sheets_by_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all time sheets for a job"""
+    return await crud_time_sheet.get_by_job(db=db, job_id=job_id)
+
+@router.get("/employee/{employee_id}", response_model=List[TimeSheet])
+async def get_time_sheets_by_employee(
+    employee_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all time sheets for an employee"""
+    return await crud_time_sheet.get_by_employee(db=db, employee_id=employee_id)
+
+@router.get("/pending", response_model=List[TimeSheet])
+async def get_pending_time_sheets(
+    job_id: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get time sheets pending approval"""
+    return await crud_time_sheet.get_pending_approval(db=db, job_id=job_id)
+
+@router.post("/{timesheet_id}/approve", response_model=TimeSheet)
+async def approve_time_sheet(
+    timesheet_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Approve a time sheet"""
+    timesheet = await crud_time_sheet.approve_timesheet(
+        db=db,
+        timesheet_id=timesheet_id,
+        approved_by=current_user.id
+    )
+    if not timesheet:
+        raise HTTPException(status_code=404, detail="Time sheet not found")
+    return timesheet
+
+@router.get("/date-range", response_model=List[TimeSheet])
+async def get_time_sheets_by_date(
+    start_date: datetime,
+    end_date: datetime,
+    employee_id: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get time sheets within date range"""
+    return await crud_time_sheet.get_by_date_range(
+        db=db,
+        start_date=start_date,
+        end_date=end_date,
+        employee_id=employee_id
+    )
+
+@router.get("/hours/total")
+async def calculate_total_hours(
+    employee_id: str,
+    start_date: datetime,
+    end_date: datetime,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Calculate total hours worked in date range"""
+    total_hours = await crud_time_sheet.calculate_total_hours(
+        db=db,
+        employee_id=employee_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+    return {"total_hours": total_hours}
+
+@router.put("/{timesheet_id}", response_model=TimeSheet)
+async def update_time_sheet(
+    *,
+    db: Session = Depends(get_db),
+    timesheet_id: str,
+    timesheet_in: TimeSheetUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update time sheet"""
+    timesheet = await crud_time_sheet.get(db=db, id=timesheet_id)
+    if not timesheet:
+        raise HTTPException(status_code=404, detail="Time sheet not found")
+    return await crud_time_sheet.update(db=db, db_obj=timesheet, obj_in=timesheet_in)
+
+# File: backend/app/api/v1/endpoints/wellbore/trajectory.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.trajectory import crud_trajectory
+from app.schemas.jobsystem.trajectory import TrajectoryResponse as Trajectory, TrajectoryCreate, TrajectoryUpdate
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Trajectory)
+async def create_trajectory(
+    *,
+    db: Session = Depends(get_db),
+    trajectory_in: TrajectoryCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new trajectory point"""
+    return await crud_trajectory.create(db=db, obj_in=trajectory_in)
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[Trajectory])
+async def get_trajectory_by_wellbore(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all trajectory points for a wellbore"""
+    return await crud_trajectory.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.get("/wellbore/{wellbore_id}/depth-range", response_model=List[Trajectory])
+async def get_trajectory_by_depth(
+    wellbore_id: str,
+    min_depth: float,
+    max_depth: float,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get trajectory points within depth range"""
+    return await crud_trajectory.get_by_depth_range(
+        db=db,
+        wellbore_id=wellbore_id,
+        min_depth=min_depth,
+        max_depth=max_depth
+    )
+
+@router.put("/{trajectory_id}", response_model=Trajectory)
+async def update_trajectory(
+    *,
+    db: Session = Depends(get_db),
+    trajectory_id: str,
+    trajectory_in: TrajectoryUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update trajectory point"""
+    trajectory = await crud_trajectory.get(db=db, id=trajectory_id)
+    if not trajectory:
+        raise HTTPException(status_code=404, detail="Trajectory point not found")
+    return await crud_trajectory.update(db=db, db_obj=trajectory, obj_in=trajectory_in)
+
+# File: backend/app/api/v1/endpoints/tubular/tubular_type.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.crud.jobsystem.tubular_type import crud_tubular_type
+from app.schemas.jobsystem.tubular_type import (
+    TubularTypeResponse as TubularType,
+    TubularTypeCreate,
+    TubularTypeUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=TubularType)
+async def create_tubular_type(
+    tubular_type_in: TubularTypeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new tubular type"""
+    return await crud_tubular_type.create(db=db, obj_in=tubular_type_in)
+
+@router.get("/", response_model=List[TubularType])
+async def get_tubular_types(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all tubular types"""
+    return await crud_tubular_type.get_multi(db=db, skip=skip, limit=limit)
+
+@router.get("/type/{type_name}", response_model=TubularType)
+async def get_tubular_type_by_name(
+    type_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get tubular type by name"""
+    tubular_type = await crud_tubular_type.get_by_type(db=db, type_name=type_name)
+    if not tubular_type:
+        raise HTTPException(status_code=404, detail="Tubular type not found")
+    return tubular_type
+
+@router.get("/short/{short_name}", response_model=TubularType)
+async def get_tubular_type_by_short_name(
+    short_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get tubular type by short name"""
+    tubular_type = await crud_tubular_type.get_by_short_name(db=db, short_name=short_name)
+    if not tubular_type:
+        raise HTTPException(status_code=404, detail="Tubular type not found")
+    return tubular_type
+
+@router.put("/{type_id}", response_model=TubularType)
+async def update_tubular_type(
+    type_id: str,
+    tubular_type_in: TubularTypeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update tubular type"""
+    tubular_type = await crud_tubular_type.get(db=db, id=type_id)
+    if not tubular_type:
+        raise HTTPException(status_code=404, detail="Tubular type not found")
+    return await crud_tubular_type.update(db=db, db_obj=tubular_type, obj_in=tubular_type_in)
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Union
+
+from app.crud.jobsystem.tubular import crud_casing, crud_liner, crud_drillstring, crud_tubular
+from app.schemas.jobsystem.tubular import (
+    CasingCreate,
+    CasingUpdate,
+    CasingResponse,
+    LinerCreate,
+    LinerUpdate,
+    LinerResponse,
+    DrillstringCreate,
+    DrillstringUpdate,
+    DrillstringResponse,
+    TubularCreate,
+    TubularUpdate,
+    TubularResponse,
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+# Generic Tubular Endpoints
+@router.post("/", response_model=TubularResponse, status_code=status.HTTP_201_CREATED)
+async def create_tubular(
+    tubular_in: TubularCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new tubular."""
+    return crud_tubular.create(db=db, obj_in=tubular_in)
+
+@router.get("/{tubular_id}", response_model=TubularResponse)
+async def get_tubular(
+    tubular_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get tubular by ID."""
+    tubular = await crud_tubular.get(db=db, id=tubular_id)
+    if not tubular:
+        raise HTTPException(status_code=404, detail="Tubular not found")
+    return tubular
+
+@router.put("/{tubular_id}", response_model=TubularResponse)
+async def update_tubular(
+    tubular_id: int,
+    tubular_in: TubularUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update tubular"""
+    tubular = await crud_tubular.get(db=db, id=tubular_id)
+    if not tubular:
+        raise HTTPException(status_code=404, detail="Tubular not found")
+    return crud_tubular.update(db=db, db_obj=tubular, obj_in=tubular_in)
+
+@router.delete("/{tubular_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tubular(
+    tubular_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a tubular."""
+    tubular = await crud_tubular.get(db=db, id=tubular_id)
+    if not tubular:
+        raise HTTPException(status_code=404, detail="Tubular not found")
+    crud_tubular.remove(db=db, id=tubular_id)
+    return
+
+@router.get("/type/{tubulartype_id}", response_model=List[Union[TubularResponse, CasingResponse, LinerResponse, DrillstringResponse]])
+async def get_tubulars_by_type(
+    tubulartype_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get tubulars by type"""
+    tubulars = await crud_tubular.get_by_type(db=db, tubulartype_id=tubulartype_id)
+    if tubulartype_id == "casing":
+        return [CasingResponse(**tubular.__dict__) for tubular in tubulars]
+    elif tubulartype_id == "liner":
+        return [LinerResponse(**tubular.__dict__) for tubular in tubulars]
+    elif tubulartype_id == "drillstring":
+        return [DrillstringResponse(**tubular.__dict__) for tubular in tubulars]
+    else:
+        return [TubularResponse(**tubular.__dict__) for tubular in tubulars]  # Return generic Tubular for unsupported types
+
+# ... (Casing, Liner, Drillstring endpoints as before)
+
+# Casing Endpoints
+@router.post("/casing/", response_model=CasingResponse, status_code=status.HTTP_201_CREATED)
+async def create_casing(casing_in: CasingCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return crud_casing.create(db=db, obj_in=casing_in)
+
+@router.get("/casing/{casing_id}", response_model=CasingResponse)
+async def get_casing(casing_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    casing = await crud_casing.get(db=db, id=casing_id)
+    if not casing:
+        raise HTTPException(status_code=404, detail="Casing not found")
+    return casing
+
+@router.put("/casing/{casing_id}", response_model=CasingResponse)
+async def update_casing(casing_id: int, casing_in: CasingUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    casing = await crud_casing.get(db=db, id=casing_id)
+    if not casing:
+        raise HTTPException(status_code=404, detail="Casing not found")
+    return crud_casing.update(db=db, db_obj=casing, obj_in=casing_in)
+
+@router.delete("/casing/{casing_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_casing(casing_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    casing = await crud_casing.get(db=db, id=casing_id)
+    if not casing:
+        raise HTTPException(status_code=404, detail="Casing not found")
+    crud_casing.remove(db=db, id=casing_id)
+    return
+
+@router.get("/casing/cement-top-range", response_model=List[CasingResponse])
+async def get_casings_by_cement_top_range(min_top: float, max_top: float, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return await crud_casing.get_by_cement_top_range(db=db, min_top=min_top, max_top=max_top)
+
+# Liner Endpoints
+@router.post("/liner/", response_model=LinerResponse, status_code=status.HTTP_201_CREATED)
+async def create_liner(liner_in: LinerCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return crud_liner.create(db=db, obj_in=liner_in)
+
+@router.get("/liner/{liner_id}", response_model=LinerResponse)
+async def get_liner(liner_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    liner = await crud_liner.get(db=db, id=liner_id)
+    if not liner:
+        raise HTTPException(status_code=404, detail="Liner not found")
+    return liner
+
+@router.put("/liner/{liner_id}", response_model=LinerResponse)
+async def update_liner(liner_id: int, liner_in: LinerUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    liner = await crud_liner.get(db=db, id=liner_id)
+    if not liner:
+        raise HTTPException(status_code=404, detail="Liner not found")
+    return crud_liner.update(db=db, db_obj=liner, obj_in=liner_in)
+
+@router.delete("/liner/{liner_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_liner(liner_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    liner = await crud_liner.get(db=db, id=liner_id)
+    if not liner:
+        raise HTTPException(status_code=404, detail="Liner not found")
+    crud_liner.remove(db=db, id=liner_id)
+    return
+
+@router.get("/liner/overlap-range", response_model=List[LinerResponse])
+async def get_liners_by_overlap_range(
+    min_overlap: float,
+    max_overlap: float,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get liners within overlap range"""
+    return await crud_liner.get_by_overlap_range(db=db, min_overlap=min_overlap, max_overlap=max_overlap)
+
+# Drillstring Endpoints
+@router.post("/drillstring/", response_model=DrillstringResponse, status_code=status.HTTP_201_CREATED)
+async def create_drillstring(
+    drillstring_in: DrillstringCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return crud_drillstring.create(db=db, obj_in=drillstring_in)
+
+@router.get("/drillstring/{drillstring_id}", response_model=DrillstringResponse)
+async def get_drillstring(
+    drillstring_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    drillstring = await crud_drillstring.get(db=db, id=drillstring_id)
+    if not drillstring:
+        raise HTTPException(status_code=404, detail="Drillstring not found")
+    return drillstring
+
+@router.put("/drillstring/{drillstring_id}", response_model=DrillstringResponse)
+async def update_drillstring(
+    drillstring_id: int,
+    drillstring_in: DrillstringUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    drillstring = await crud_drillstring.get(db=db, id=drillstring_id)
+    if not drillstring:
+        raise HTTPException(status_code=404, detail="Drillstring not found")
+    return crud_drillstring.update(db=db, db_obj=drillstring, obj_in=drillstring_in)
+
+@router.delete("/drillstring/{drillstring_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_drillstring(
+    drillstring_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    drillstring = await crud_drillstring.get(db=db, id=drillstring_id)
+    if not drillstring:
+        raise HTTPException(status_code=404, detail="Drillstring not found")
+    crud_drillstring.remove(db=db, id=drillstring_id)
+    return
+
+@router.get("/drillstring/component-type/{component_type}", response_model=List[DrillstringResponse])
+async def get_drillstrings_by_component_type(
+    component_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get drillstrings by component type"""
+    return await crud_drillstring.get_by_component_type(db=db, component_type=component_type)
+
+# File: backend/app/api/v1/endpoints/well/well_shape.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.well_shape import crud_well_shape
+from app.schemas.jobsystem.well_shape import (
+    WellShapeResponse as WellShape,
+    WellShapeCreate,
+    WellShapeUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=WellShape)
+async def create_well_shape(
+    well_shape_in: WellShapeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new well shape"""
+    return await crud_well_shape.create(db=db, obj_in=well_shape_in)
+
+@router.get("/type/{well_shape}", response_model=WellShape)
+async def get_well_shape(
+    well_shape: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get well shape by name"""
+    shape = await crud_well_shape.get_by_type(db=db, type_value=well_shape, type_field="well_shape")
+    if not shape:
+        raise HTTPException(status_code=404, detail="Well shape not found")
+    return shape
+
+@router.put("/{type_id}", response_model=WellShape)
+async def update_well_shape(
+    type_id: str,
+    well_shape_in: WellShapeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update well shape"""
+    well_shape = await crud_well_shape.get(db=db, id=type_id)
+    if not well_shape:
+        raise HTTPException(status_code=404, detail="Well shape not found")
+    return await crud_well_shape.update(db=db, db_obj=well_shape, obj_in=well_shape_in)
+
+@router.get("/", response_model=List[WellShape])
+async def get_all_well_shapes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all well shapes"""
+    return await crud_well_shape.get_all(db=db)
+
+@router.delete("/{type_id}", response_model=dict)
+async def delete_well_shape(
+    type_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete well shape"""
+    well_shape = await crud_well_shape.get(db=db, id=type_id)
+    if not well_shape:
+        raise HTTPException(status_code=404, detail="Well shape not found")
+    await crud_well_shape.delete(db=db, id=type_id)
+    return {"message": "Well shape deleted successfully"}
+
+# File: backend/app/api/v1/endpoints/well/well_type.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.jobsystem.well_type import crud_well_type
+from app.schemas.jobsystem.well_type import (
+    WellTypeResponse as WellType,
+    WellTypeCreate,
+    WellTypeUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+
+@router.post("/", response_model=WellType)
+async def create_well_type(
+    well_type_in: WellTypeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new well type"""
+    print(f"Received data: {well_type_in.dict()}")  # Add this line
+    return await crud_well_type.create(db=db, obj_in=well_type_in)
+
+@router.get("/type/{well_type}", response_model=WellType)
+async def get_well_type(
+    well_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get well type by name"""
+    well = await crud_well_type.get_by_type(db=db, type_value=well_type, type_field="well_type_name")
+    if not well:
+        raise HTTPException(status_code=404, detail="Well type not found")
+    return well
+
+@router.put("/{type_id}", response_model=WellType)
+async def update_well_type(
+    type_id: str,
+    well_type_in: WellTypeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update well type"""
+    well_type = await crud_well_type.get(db=db, id=type_id)
+    if not well_type:
+        raise HTTPException(status_code=404, detail="Well type not found")
+    return await crud_well_type.update(db=db, db_obj=well_type, obj_in=well_type_in)
+
+@router.get("/", response_model=List[WellType])
+async def get_all_well_types(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 100
+):
+    """Get all well types"""
+    return await crud_well_type.get_all(db=db)
+
+@router.delete("/{type_id}", response_model=dict)
+async def delete_well_type(
+    type_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete well type"""
+    well_type = await crud_well_type.get(db=db, id=type_id)
+    if not well_type:
+        raise HTTPException(status_code=404, detail="Well type not found")
+    await crud_well_type.delete(db=db, id=type_id)
+    return {"message": "Well type deleted successfully"}
+
+# File: app/api/v1/endpoints/job/well.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.api.deps import get_db, get_current_active_user
+from app.crud.jobsystem.well import crud_well
+from app.schemas.jobsystem.well import WellCreate, WellUpdate, WellResponse  # Changed from wellsystem to jobsystem
+from app.models.authsystem.user import User
+from app.crud.jobsystem.slot import crud_slot  # Added for slot validation
+
+router = APIRouter()
+
+@router.post("/", response_model=WellResponse, status_code=status.HTTP_201_CREATED)
+async def create_well(
+    *,
+    well_in: WellCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Create new well"""
+    try:
+        # Validate slot exists
+        slot = await crud_slot.get(db=db, id=str(well_in.slot_id))
+        if not slot:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Slot with id {well_in.slot_id} not found"
+            )
+            
+        return await crud_well.create(db=db, obj_in=well_in)
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.get("/", response_model=List[WellResponse])
+async def read_wells(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all wells"""
+    try:
+        return await crud_well.get_multi(db, skip=skip, limit=limit)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.get("/slot/{slot_id}", response_model=List[WellResponse])
+async def read_wells_by_slot(
+    slot_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get wells by slot ID"""
+    try:
+        # Validate slot exists
+        slot = await crud_slot.get(db=db, id=slot_id)
+        if not slot:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Slot with id {slot_id} not found"
+            )
+            
+        wells = await crud_well.get_by_slot(db=db, slot_id=slot_id)
+        return wells
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.get("/{well_id}", response_model=WellResponse)
+async def read_well(
+    well_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get well by ID"""
+    try:
+        well = await crud_well.get(db=db, id=well_id)
+        if not well:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Well not found"
+            )
+        return well
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.put("/{well_id}", response_model=WellResponse)
+async def update_well(
+    *,
+    well_id: str,
+    well_in: WellUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Update well"""
+    try:
+        well = await crud_well.get(db=db, id=well_id)
+        if not well:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Well not found"
+            )
+            
+        # Validate slot_id if it's being updated
+        if well_in.slot_id:
+            slot = await crud_slot.get(db=db, id=str(well_in.slot_id))
+            if not slot:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Slot with id {well_in.slot_id} not found"
+                )
+                
+        return await crud_well.update(db=db, db_obj=well, obj_in=well_in)
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.get("/operator/{operator_id}", response_model=List[WellResponse])
+async def get_wells_by_operator(
+    operator_id: str, # Or int, depending on your operator_id type
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user), # Optional authentication
+):
+    """
+    Retrieve wells associated with a specific operator.
+    """
+    try:
+        #Attempt to convert the operator_id to an integer
+        pass
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid operator ID. Must be an integer.")
+
+    wells = await crud_well.get_wells_by_operator_id(db=db, operator_id=operator_id)
+
+    if not wells:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No wells found for operator ID: {operator_id}")
+
+    return wells
+
+@router.delete("/{well_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_well(
+    *,
+    well_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Delete well"""
+    try:
+        well = await crud_well.get(db=db, id=well_id)
+        if not well:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Well not found"
+            )
+        await crud_well.remove(db=db, id=well_id)
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+    await crud_well.remove(db=db, id=well_id)
+
+# File: backend/app/api/v1/endpoints/wellbore/wellbore.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from datetime import datetime
+from app.crud.jobsystem.wellbore import crud_wellbore
+from app.schemas.jobsystem.wellbore import WellboreResponse as Wellbore, WellboreCreate, WellboreUpdate
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=Wellbore)
+async def create_wellbore(
+    *,
+    db: Session = Depends(get_db),
+    wellbore_in: WellboreCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create new wellbore"""
+    return await crud_wellbore.create(db=db, obj_in=wellbore_in)
+
+@router.get("/", response_model=List[Wellbore])
+async def get_all_wellbores(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all wellbores with pagination"""
+    return await crud_wellbore.get_multi(db=db, skip=skip, limit=limit)
+
+@router.get("/active", response_model=List[Wellbore])
+async def get_active_wellbores(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all active wellbores"""
+    return await crud_wellbore.get_active_wellbores(db=db)
+
+@router.get("/planned", response_model=List[Wellbore])
+async def get_planned_wellbores(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get planned wellbores"""
+    return await crud_wellbore.get_planned_wellbores(db=db)
+
+@router.get("/completed", response_model=List[Wellbore])
+async def get_completed_wellbores(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get completed wellbores"""
+    return await crud_wellbore.get_completed_wellbores(db=db)
+
+@router.get("/well/{well_id}", response_model=List[Wellbore])
+async def get_wellbores_by_well(
+    well_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all wellbores for a well"""
+    return await crud_wellbore.get_by_well(db=db, well_id=well_id)
+
+@router.get("/{wellbore_id}", response_model=Wellbore)
+async def get_wellbore(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get wellbore by ID"""
+    wellbore = await crud_wellbore.get(db=db, id=wellbore_id)
+    if not wellbore:
+        raise HTTPException(status_code=404, detail="Wellbore not found")
+    return wellbore
+
+@router.get("/{wellbore_id}/summary")
+async def get_wellbore_summary(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get comprehensive wellbore summary"""
+    summary = await crud_wellbore.get_wellbore_summary(db=db, wellbore_id=wellbore_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Wellbore not found")
+    return summary
+
+@router.put("/{wellbore_id}", response_model=Wellbore)
+async def update_wellbore(
+    *,
+    db: Session = Depends(get_db),
+    wellbore_id: str,
+    wellbore_in: WellboreUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update wellbore"""
+    wellbore = await crud_wellbore.get(db=db, id=wellbore_id)
+    if not wellbore:
+        raise HTTPException(status_code=404, detail="Wellbore not found")
+    return await crud_wellbore.update(db=db, db_obj=wellbore, obj_in=wellbore_in)
+
+@router.get("/date-range", response_model=List[Wellbore])
+async def get_wellbores_by_date(
+    start_date: datetime,
+    end_date: datetime,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get wellbores within date range"""
+    return await crud_wellbore.get_by_date_range(
+        db=db,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+@router.post("/{wellbore_id}/costs")
+async def calculate_wellbore_costs(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Calculate actual vs planned costs for wellbore"""
+    costs = await crud_wellbore.calculate_costs(db=db, wellbore_id=wellbore_id)
+    if not costs:
+        raise HTTPException(status_code=404, detail="Wellbore not found")
+    return costs
+
+
+# File: backend/app/api/v1/endpoints/logistics/backload.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.crud.logisticsystem.backload import crud_backload
+from app.schemas.logisticsystem.backload import (
+    BackloadResponse,
+    BackloadCreate,
+    BackloadUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse
+
+router = APIRouter()
+
+@router.post("/", response_model=BackloadResponse)
+async def create_backload(
+    backload_in: BackloadCreate,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Create new backload sheet"""
+    return await crud_backload.create(db=db, obj_in=backload_in)
+
+@router.get("/{backload_id}", response_model=BackloadResponse)
+async def get_backload(
+    backload_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get backload by ID"""
+    backload = await crud_backload.get(db=db, id=backload_id)
+    if not backload:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Backload not found"
+        )
+    return backload
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[BackloadResponse])
+async def get_wellbore_backloads(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get all backloads for a wellbore"""
+    return await crud_backload.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.put("/{backload_id}", response_model=BackloadResponse)
+async def update_backload(
+    backload_id: str,
+    backload_in: BackloadUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Update backload sheet"""
+    backload = await crud_backload.get(db=db, id=backload_id)
+    if not backload:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Backload not found"
+        )
+    return await crud_backload.update(db=db, db_obj=backload, obj_in=backload_in)
+
+@router.post("/{backload_id}/approve")
+async def approve_backload(
+    backload_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Approve backload sheet"""
+    backload = await crud_backload.approve_backload(
+        db=db,
+        backload_id=backload_id,
+        approved_by=current_user.id
+    )
+    if not backload:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Backload not found"
+        )
+    return {"message": "Backload approved successfully"}
+
+@router.get("/pending", response_model=List[BackloadResponse])
+async def get_pending_backloads(
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get all pending backloads"""
+    return await crud_backload.get_pending_approvals(db=db)
+
+# File: backend/app/api/v1/endpoints/logistics/delivery_ticket.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from datetime import datetime
+from app.crud.logisticsystem.delivery_ticket import crud_delivery_ticket
+from app.crud.logisticsystem.delivery_ticket_item import crud_delivery_ticket_item
+from app.schemas.logisticsystem.delivery_ticket import (
+    DeliveryTicketResponse,
+    DeliveryTicketCreate,
+    DeliveryTicketUpdate
+)
+from app.schemas.logisticsystem.delivery_ticket_item import (
+    DeliveryTicketItemResponse,
+    DeliveryTicketItemCreate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=DeliveryTicketResponse)
+async def create_delivery_ticket(
+    ticket_in: DeliveryTicketCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new delivery ticket"""
+    return await crud_delivery_ticket.create(db=db, obj_in=ticket_in)
+
+@router.get("/{ticket_id}", response_model=DeliveryTicketResponse)
+async def get_delivery_ticket(
+    ticket_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get delivery ticket by ID"""
+    ticket = await crud_delivery_ticket.get(db=db, id=ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Delivery ticket not found"
+        )
+    return ticket
+
+@router.get("/number/{ticket_number}", response_model=DeliveryTicketResponse)
+async def get_by_ticket_number(
+    ticket_number: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get delivery ticket by number"""
+    ticket = await crud_delivery_ticket.get_by_ticket_number(
+        db=db,
+        ticket_number=ticket_number
+    )
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Delivery ticket not found"
+        )
+    return ticket
+
+@router.get("/wellbore/{wellbore_id}", response_model=List[DeliveryTicketResponse])
+async def get_wellbore_tickets(
+    wellbore_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all delivery tickets for a wellbore"""
+    return await crud_delivery_ticket.get_by_wellbore(db=db, wellbore_id=wellbore_id)
+
+@router.get("/purchase-order/{po_id}", response_model=List[DeliveryTicketResponse])
+async def get_po_tickets(
+    po_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all delivery tickets for a purchase order"""
+    return await crud_delivery_ticket.get_by_purchase_order(
+        db=db,
+        purchase_order_id=po_id
+    )
+
+@router.put("/{ticket_id}", response_model=DeliveryTicketResponse)
+async def update_delivery_ticket(
+    ticket_id: str,
+    ticket_in: DeliveryTicketUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update delivery ticket"""
+    ticket = await crud_delivery_ticket.get(db=db, id=ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Delivery ticket not found"
+        )
+    return await crud_delivery_ticket.update(db=db, db_obj=ticket, obj_in=ticket_in)
+
+@router.post("/{ticket_id}/items", response_model=DeliveryTicketItemResponse)
+async def add_ticket_item(
+    ticket_id: str,
+    item_in: DeliveryTicketItemCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Add item to delivery ticket"""
+    ticket = await crud_delivery_ticket.get(db=db, id=ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Delivery ticket not found"
+        )
+    return await crud_delivery_ticket_item.create(db=db, obj_in=item_in)
+
+@router.get("/{ticket_id}/items", response_model=List[DeliveryTicketItemResponse])
+async def get_ticket_items(
+    ticket_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all items for a delivery ticket"""
+    return await crud_delivery_ticket_item.get_by_delivery_ticket(
+        db=db,
+        delivery_ticket_id=ticket_id
+    )
+
+@router.get("/date-range", response_model=List[DeliveryTicketResponse])
+async def get_tickets_by_date(
+    start_date: datetime,
+    end_date: datetime,
+    wellbore_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get delivery tickets within date range"""
+    return await crud_delivery_ticket.get_by_date_range(
+        db=db,
+        start_date=start_date,
+        end_date=end_date,
+        wellbore_id=wellbore_id
+    )
+
+# File: backend/app/api/v1/endpoints/logisticssystem/purchase_order.py
+from typing import List, Any
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.models.authsystem.user import User
+from app.api import deps
+from app.crud.logisticsystem.purchase_order import crud_purchase_order
+from app.models.logisticsystem.purchase_order import PurchaseOrder
+from app.schemas.logisticsystem.purchase_order import (
+    PurchaseOrderCreate,
+    PurchaseOrderUpdate,
+    PurchaseOrderResponse
+)
+
+router = APIRouter()
+# crud_purchase_order = CRUDPurchaseOrder(PurchaseOrder)
+
+@router.get("/", response_model=List[PurchaseOrderResponse])
+async def read_purchase_orders(
+    db: Session = Depends(deps.get_db),
+    skip: int = 0,
+    limit: int = 100,
+    current_user: User = Depends(deps.get_current_active_user)
+) -> Any:
+    """
+    Retrieve purchase orders.
+    """
+    purchase_orders = await crud_purchase_order.get_multi(
+        db, skip=skip, limit=limit
+    )
+    return purchase_orders
+
+@router.post("/", response_model=PurchaseOrderResponse)
+async def create_purchase_order(
+    *,
+    db: Session = Depends(deps.get_db),
+    purchase_order_in: PurchaseOrderCreate,
+    current_user: User = Depends(deps.get_current_active_user)
+) -> Any:
+    """
+    Create new purchase order.
+    """
+    purchase_order = await crud_purchase_order.create(
+        db=db, obj_in=purchase_order_in
+    )
+    return purchase_order
+
+# File: backend/app/api/v1/endpoints/rig/contractor.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.rigsystem.contractor import crud_contractor
+from app.schemas.rigsystem.contractor import (
+    ContractorResponse as Contractor, ContractorCreate, ContractorUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User    
+
+router = APIRouter()
+
+@router.post("/", response_model=Contractor)
+async def create_contractor(
+    contractor_in: ContractorCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new contractor"""
+    return await crud_contractor.create(db=db, obj_in=contractor_in)
+
+@router.get("/name/{contractor_name}", response_model=Contractor)
+async def get_contractor_by_name(
+    contractor_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get contractor by name"""
+    contractor = await crud_contractor.get_by_name(db=db, contractor_name=contractor_name)
+    if not contractor:
+        raise HTTPException(status_code=404, detail="Contractor not found")
+    return contractor
+
+@router.get("/country/{country}", response_model=List[Contractor])
+async def get_contractors_by_country(
+    country: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get contractors by country"""
+    return await crud_contractor.get_by_country(db=db, country=country)
+
+@router.put("/{contractor_id}", response_model=Contractor)
+async def update_contractor(
+    contractor_id: str,
+    contractor_in: ContractorUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update contractor"""
+    contractor = await crud_contractor.get(db=db, id=contractor_id)
+    if not contractor:
+        raise HTTPException(status_code=404, detail="Contractor not found")
+    return await crud_contractor.update(db=db, db_obj=contractor, obj_in=contractor_in)
+
+# File: backend/app/api/v1/endpoints/rig/mud_pump.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.crud.rigsystem.mud_pump import crud_mud_pump
+from app.schemas.rigsystem.mud_pump import (
+    MudPumpResponse as MudPump, MudPumpCreate, MudPumpUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=MudPump)
+async def create_mud_pump(
+    pump_in: MudPumpCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new mud pump"""
+    return await crud_mud_pump.create(db=db, obj_in=pump_in)
+
+@router.get("/rig/{rig_id}", response_model=List[MudPump])
+async def get_pumps_by_rig(
+    rig_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all mud pumps for a rig"""
+    return await crud_mud_pump.get_by_rig(db=db, rig_id=rig_id)
+
+@router.get("/serial/{serial_number}", response_model=MudPump)
+async def get_pump_by_serial(
+    serial_number: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get mud pump by serial number"""
+    pump = await crud_mud_pump.get_by_serial_number(db=db, serial_number=serial_number)
+    if not pump:
+        raise HTTPException(status_code=404, detail="Mud pump not found")
+    return pump
+
+@router.get("/type/{pump_type}", response_model=List[MudPump])
+async def get_pumps_by_type(
+    pump_type: str,
+    rig_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get mud pumps by type"""
+    return await crud_mud_pump.get_by_type(
+        db=db,
+        pump_type=pump_type,
+        rig_id=rig_id
+    )
+
+@router.put("/{pump_id}", response_model=MudPump)
+async def update_mud_pump(
+    pump_id: str,
+    pump_in: MudPumpUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update mud pump"""
+    pump = await crud_mud_pump.get(db=db, id=pump_id)
+    if not pump:
+        raise HTTPException(status_code=404, detail="Mud pump not found")
+    return await crud_mud_pump.update(db=db, db_obj=pump, obj_in=pump_in)
+
+# File: backend/app/api/v1/endpoints/rig/rig_equipment.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.rigsystem.rig_equipment import crud_rig_equipment
+from app.schemas.rigsystem.rig_equipment import (
+    RigEquipmentResponse as RigEquipment, RigEquipmentCreate, RigEquipmentUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=RigEquipment)
+async def create_rig_equipment(
+    equipment_in: RigEquipmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new rig equipment"""
+    return await crud_rig_equipment.create(db=db, obj_in=equipment_in)
+
+@router.get("/rig/{rig_id}", response_model=RigEquipment)
+async def get_equipment_by_rig(
+    rig_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get equipment for a rig"""
+    equipment = await crud_rig_equipment.get_by_rig(db=db, rig_id=rig_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    return equipment
+
+@router.get("/manufacturer/{manufacturer}", response_model=List[RigEquipment])
+async def get_equipment_by_manufacturer(
+    manufacturer: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get equipment by manufacturer"""
+    return await crud_rig_equipment.get_by_manufacturer(db=db, manufacturer=manufacturer)
+
+@router.put("/{equipment_id}", response_model=RigEquipment)
+async def update_rig_equipment(
+    equipment_id: str,
+    equipment_in: RigEquipmentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update rig equipment"""
+    equipment = await crud_rig_equipment.get(db=db, id=equipment_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    return await crud_rig_equipment.update(db=db, db_obj=equipment, obj_in=equipment_in)
+
+# File: backend/app/api/v1/endpoints/rig/rig_stability.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.rigsystem.rig_stability import crud_rig_stability
+from app.schemas.rigsystem.rig_stability import (
+    RigStability, RigStabilityCreate, RigStabilityUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import User
+
+router = APIRouter()
+
+@router.post("/", response_model=RigStability)
+async def create_rig_stability(
+    stability_in: RigStabilityCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new rig stability record"""
+    return await crud_rig_stability.create(db=db, obj_in=stability_in)
+
+@router.get("/rig/{rig_id}", response_model=RigStability)
+async def get_stability_by_rig(
+    rig_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get stability data for a rig"""
+    stability = await crud_rig_stability.get_by_rig(db=db, rig_id=rig_id)
+    if not stability:
+        raise HTTPException(status_code=404, detail="Stability data not found")
+    return stability
+
+@router.get("/capacity/{min_deck_load}", response_model=List[RigStability])
+async def get_rigs_by_capacity(
+    min_deck_load: float,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get rigs by minimum deck load capacity"""
+    return await crud_rig_stability.get_rigs_by_capacity(db=db, min_deck_load=min_deck_load)
+
+@router.put("/{stability_id}", response_model=RigStability)
+async def update_rig_stability(
+    stability_id: str,
+    stability_in: RigStabilityUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update rig stability data"""
+    stability = await crud_rig_stability.get(db=db, id=stability_id)
+    if not stability:
+        raise HTTPException(status_code=404, detail="Stability data not found")
+    return await crud_rig_stability.update(db=db, db_obj=stability, obj_in=stability_in)
+
+
+# File: backend/app/api/v1/endpoints/well/rig_type.py
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from fastapi.responses import JSONResponse
+
+from app.core.deps import get_db, get_current_user
+from app.crud.rigsystem.rig_type import crud_rig_type
+from app.schemas.rigsystem.rig_type import (
+    RigTypeCreate,
+    RigTypeUpdate,
+    RigTypeResponse
+)
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=RigTypeResponse)
+async def create_rig_type(
+    *,
+    rig_type_in: RigTypeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> RigTypeResponse:
+    """
+    Create new rig type.
+    """
+    rig_type = await crud_rig_type.get_by_name(db=db, name=rig_type_in.rig_type_name)
+    if rig_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Rig type with this name already exists"
+        )
+    return await crud_rig_type.create(db=db, obj_in=rig_type_in)
+
+@router.get("/{rig_type_id}", response_model=RigTypeResponse)
+async def get_rig_type(
+    rig_type_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> RigTypeResponse:
+    """
+    Get rig type by ID.
+    """
+    rig_type = await crud_rig_type.get(db=db, id=rig_type_id)
+    if not rig_type:
+        raise HTTPException(
+            status_code=404,
+            detail="Rig type not found"
+        )
+    return rig_type
+
+@router.get("/", response_model=List[RigTypeResponse])
+async def get_rig_types(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1)
+) -> List[RigTypeResponse]:
+    """
+    Get all rig types with pagination.
+    """
+    return await crud_rig_type.get_all(db=db, skip=skip, limit=limit)
+
+@router.put("/{rig_type_id}", response_model=RigTypeResponse)
+async def update_rig_type(
+    *,
+    rig_type_id: str,
+    rig_type_in: RigTypeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> RigTypeResponse:
+    """
+    Update a rig type.
+    """
+    rig_type = await crud_rig_type.get(db=db, id=rig_type_id)
+    if not rig_type:
+        raise HTTPException(
+            status_code=404,
+            detail="Rig type not found"
+        )
+    
+    if rig_type_in.rig_type_name:
+        existing_rig_type = await crud_rig_type.get_by_name(db=db, name=rig_type_in.rig_type_name)
+        if existing_rig_type and existing_rig_type.id != rig_type_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Rig type with this name already exists"
+            )
+    
+    return await crud_rig_type.update(db=db, db_obj=rig_type, obj_in=rig_type_in)
+
+@router.delete("/{rig_type_id}")
+async def delete_rig_type(
+    rig_type_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> JSONResponse:
+    """
+    Delete a rig type.
+    """
+    rig_type = await crud_rig_type.get(db=db, id=rig_type_id)
+    if not rig_type:
+        raise HTTPException(
+            status_code=404,
+            detail="Rig type not found"
+        )
+    
+    success = await crud_rig_type.delete(db=db, id=rig_type_id)
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Error deleting rig type"
+        )
+    
+    return JSONResponse(
+        content={"message": "Rig type deleted successfully"},
+        status_code=200
+    )
+
+@router.delete("/")
+async def delete_multiple_rig_types(
+    ids: List[str],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> JSONResponse:
+    """
+    Delete multiple rig types.
+    """
+    success = await crud_rig_type.multi_delete(db=db, ids=ids)
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Error deleting rig types"
+        )
+    
+    return JSONResponse(
+        content={"message": "Rig types deleted successfully"},
+        status_code=200
+    )
+
+
+# File: backend/app/api/api_v1/endpoints/rig/rig.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.rigsystem.rig import crud_rig
+from app.schemas.rigsystem.rig import RigResponse, RigCreate, RigUpdate
+from app.core.deps import get_db
+
+router = APIRouter()
+
+@router.post("/", response_model=RigResponse)
+async def create_rig(
+    rig_in: RigCreate,
+    db: Session = Depends(get_db)
+):
+    """Create new rig"""
+    return await crud_rig.create(db=db, obj_in=rig_in)
+
+@router.get("/", response_model=List[RigResponse])
+async def read_rigs(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """Get all rigs"""
+    return await crud_rig.get_multi(db, skip=skip, limit=limit)
+
+@router.get("/active", response_model=List[RigResponse])
+async def read_active_rigs(
+    db: Session = Depends(get_db)
+):
+    """Get active rigs"""
+    return await crud_rig.get_active_rigs(db=db)
+
+
+# File: backend/app/api/v1/endpoints/rig/rotary_equipment.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.rigsystem.rotary_equipment import crud_rotary_equipment
+from app.schemas.rigsystem.rotary_equipment import (
+    RotaryEquipmentResponse as RotaryEquipment, RotaryEquipmentCreate, RotaryEquipmentUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=RotaryEquipment)
+async def create_rotary_equipment(
+    equipment_in: RotaryEquipmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new rotary equipment"""
+    return await crud_rotary_equipment.create(db=db, obj_in=equipment_in)
+
+@router.get("/rig/{rig_id}", response_model=RotaryEquipment)
+async def get_equipment_by_rig(
+    rig_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get equipment for a rig"""
+    equipment = await crud_rotary_equipment.get_by_rig(db=db, rig_id=rig_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    return equipment
+
+@router.get("/manufacturer/{manufacturer}", response_model=List[RotaryEquipment])
+async def get_equipment_by_manufacturer(
+    manufacturer: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get equipment by top drive manufacturer"""
+    return await crud_rotary_equipment.get_by_manufacturer(db=db, manufacturer=manufacturer)
+
+@router.get("/power/{min_power}", response_model=List[RotaryEquipment])
+async def get_equipment_by_power(
+    min_power: float,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get equipment by minimum power rating"""
+    return await crud_rotary_equipment.get_by_power_rating(db=db, min_power=min_power)
+
+@router.put("/{equipment_id}", response_model=RotaryEquipment)
+async def update_rotary_equipment(
+    equipment_id: str,
+    equipment_in: RotaryEquipmentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update rotary equipment"""
+    equipment = await crud_rotary_equipment.get(db=db, id=equipment_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    return await crud_rotary_equipment.update(db=db, db_obj=equipment, obj_in=equipment_in)
+
+# File: backend/app/api/v1/endpoints/rig/well_control_equipment.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.crud.rigsystem.well_control_equipment import crud_well_control_equipment
+from app.schemas.rigsystem.well_control_equipment import (
+    WellControlEquipmentResponse as WellControlEquipment,
+    WellControlEquipmentCreate,
+    WellControlEquipmentUpdate
+)
+from app.core.deps import get_db, get_current_user
+from app.schemas.authsystem.user import UserResponse as User
+
+router = APIRouter()
+
+@router.post("/", response_model=WellControlEquipment)
+async def create_well_control_equipment(
+    equipment_in: WellControlEquipmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create new well control equipment"""
+    return await crud_well_control_equipment.create(db=db, obj_in=equipment_in)
+
+@router.get("/rig/{rig_id}", response_model=WellControlEquipment)
+async def get_equipment_by_rig(
+    rig_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get well control equipment for a rig"""
+    equipment = await crud_well_control_equipment.get_by_rig(db=db, rig_id=rig_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    return equipment
+
+@router.get("/pressure/{min_pressure}", response_model=List[WellControlEquipment])
+async def get_equipment_by_pressure(
+    min_pressure: float,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get equipment by minimum pressure rating"""
+    return await crud_well_control_equipment.get_by_pressure_rating(db=db, min_pressure=min_pressure)
+
+@router.get("/manufacturer/{manufacturer}", response_model=List[WellControlEquipment])
+async def get_equipment_by_manufacturer(
+    manufacturer: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get equipment by diverter manufacturer"""
+    return await crud_well_control_equipment.get_by_manufacturer(db=db, manufacturer=manufacturer)
+
+@router.put("/{equipment_id}", response_model=WellControlEquipment)
+async def update_well_control_equipment(
+    equipment_id: str,
+    equipment_in: WellControlEquipmentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update well control equipment"""
+    equipment = await crud_well_control_equipment.get(db=db, id=equipment_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    return await crud_well_control_equipment.update(db=db, db_obj=equipment, obj_in=equipment_in)
+
+@router.get("/{equipment_id}/specifications", response_model=dict)
+async def get_equipment_specifications(
+    equipment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed specifications for well control equipment"""
+    equipment = await crud_well_control_equipment.get(db=db, id=equipment_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    
+    return {
+        "bop_specifications": {
+            "size": equipment.bop_size,
+            "max_pressure": equipment.bop_max_pressure,
+            "max_temperature": equipment.bop_max_temperature
+        },
+        "diverter_specifications": {
+            "manufacturer": equipment.diverter_manufacturer,
+            "model": equipment.diverter_model
+        },
+        "line_specifications": {
+            "number": equipment.line_number,
+            "internal_diameter": equipment.internal_diameter,
+            "max_pressure": equipment.max_pressure,
+            "length": equipment.line_length,
+            "closing_time": equipment.closing_time
+        },
+        "choke_specifications": {
+            "line_diameter": equipment.choke_line_diameter,
+            "line_pressure": equipment.choke_line_pressure
+        },
+        "kill_specifications": {
+            "line_diameter": equipment.kill_line_diameter
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

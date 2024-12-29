@@ -1,141 +1,182 @@
-// src/services/jobService.js
-import axios from '../utils/axios';
+// jobService.js
+import api, { handleApiError } from './api';
 
-const JOB_API_URL = '/jobs';
-
-// Create axios instance with custom config
-const axiosInstance = axios.create({
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json'
-  }
-});
-
-// Format dates for API
+// Utility functions
 const formatDateForAPI = (date) => {
   if (!date) return null;
   return new Date(date).toISOString();
 };
 
-// Transform job data for API
-const transformJobDataForAPI = (data) => {
-  return {
-    jobcenter_id: data.jobcenter_id || null,
-    job_name: data.job_name,
-    job_description: data.job_description || null,
-    rig_id: data.rig_id || null,
-    purchase_order_id: data.purchase_order_id || null,
-    operator_id: data.operator_id || null,
-    well_id: data.well_id || null,
-    service_code: data.service_code || null,
-    country: data.country || null,
-    measured_depth: data.measured_depth ? Number(data.measured_depth) : null,
-    total_vertical_depth: data.total_vertical_depth ? Number(data.total_vertical_depth) : null,
-    spud_date: formatDateForAPI(data.spud_date),
-    status: data.status || 'Planned',
-    mobilization_date: formatDateForAPI(data.mobilization_date),
-    demobilization_date: formatDateForAPI(data.demobilization_date),
-    job_closed: Boolean(data.job_closed),
-    trainingfile: Boolean(data.trainingfile)
-  };
-};
-const handleError = (error, customMessage) => {
-  console.error('API Error:', error);
-  console.error('Error Response Data:', error.response?.data);
-  console.error('Error Config Data:', error.config?.data);
-  
-  if (axios.isCancel(error)) {
-    throw new Error('Request was cancelled');
-  }
+const transformJobDataForAPI = (data) => ({
+  jobcenter_id: data.jobcenter_id || null,
+  job_name: data.job_name,
+  job_description: data.job_description || null,
+  rig_id: data.rig_id || null,
+  purchase_order_id: data.purchase_order_id || null,
+  operator_id: data.operator_id || null,
+  well_id: data.well_id || null,
+  service_code: data.service_code || null,
+  country: data.country || null,
+  measured_depth: data.measured_depth ? Number(data.measured_depth) : null,
+  total_vertical_depth: data.total_vertical_depth ? Number(data.total_vertical_depth) : null,
+  spud_date: formatDateForAPI(data.spud_date),
+  status: data.status || 'Planned',
+  mobilization_date: formatDateForAPI(data.mobilization_date),
+  demobilization_date: formatDateForAPI(data.demobilization_date),
+  job_closed: Boolean(data.job_closed),
+  trainingfile: Boolean(data.trainingfile)
+});
 
-  if (error.code === 'ECONNABORTED') {
-    throw new Error('Request timed out - please try again');
-  }
-
-  if (error.response) {
-    let errorMessage;
-    if (error.response.data?.detail) {
-      errorMessage = error.response.data.detail;
-    } else if (error.response.data?.message) {
-      errorMessage = error.response.data.message;
-    } else if (typeof error.response.data === 'string') {
-      errorMessage = error.response.data;
-    } else if (error.response.status === 400) {
-      errorMessage = 'Invalid data submitted. Please check all required fields.';
-    } else {
-      errorMessage = `Server error: ${error.response.status}`;
+const getJobs = async (params) => {
+  try {
+    // Check network connectivity
+    if (!navigator.onLine) {
+      throw new Error('No internet connection');
     }
-    throw new Error(errorMessage);
-  }
 
-  if (error.request) {
-    throw new Error('No response from server - please check your connection');
-  }
+    // Transform frontend pagination params to match backend API
+    const apiParams = {
+      skip: ((params.page || 1) - 1) * (params.pageSize || 10),
+      limit: params.pageSize || 10,
+      sort_field: params.sortField || 'created_at',
+      sort_order: params.sortOrder || 'desc',
+      status: params.status !== 'ALL' ? params.status : undefined,
+      search_term: params.searchTerm || undefined
+    };
 
-  throw new Error(error.message || customMessage || 'An unexpected error occurred');
+    console.log('Fetching jobs with params:', apiParams);
+
+    const response = await api.get('/jobs', { params: apiParams });
+
+    // Handle empty response
+    if (!response) {
+      console.warn('Empty response received from jobs endpoint');
+      return {
+        items: [],
+        total: 0,
+        page: params.page || 1,
+        page_size: params.pageSize || 10,
+        total_pages: 0
+      };
+    }
+
+    // If response is already transformed by interceptor, return it
+    if (response.items) {
+      return response;
+    }
+
+    // Transform array response
+    const jobs = Array.isArray(response) ? response : [];
+    return {
+      items: jobs,
+      total: jobs.length,
+      page: params.page || 1,
+      page_size: params.pageSize || 10,
+      total_pages: Math.ceil(jobs.length / (params.pageSize || 10))
+    };
+
+  } catch (error) {
+    console.error('Error in getJobs:', error);
+    throw error;
+  }
+};
+
+const getAllJobs = () => {
+  try {
+    return api.get('/jobs');
+  } catch (error) {
+    return handleApiError(error, 'Failed to fetch all jobs');
+  }
+};
+
+const getJobById = async (id) => {
+  try {
+    return await api.get(`/jobs/${id}`);
+  } catch (error) {
+    return handleApiError(error, `Failed to fetch job with ID: ${id}`);
+  }
+};
+
+const createJob = async (data) => {
+  try {
+    const transformedData = transformJobDataForAPI(data);
+    return await api.post('/jobs', transformedData);
+  } catch (error) {
+    return handleApiError(error, 'Failed to create job');
+  }
+};
+
+const updateJob = async (id, data) => {
+  try {
+    const transformedData = transformJobDataForAPI(data);
+    return await api.put(`/jobs/${id}`, transformedData);
+  } catch (error) {
+    return handleApiError(error, `Failed to update job with ID: ${id}`);
+  }
+};
+
+const deleteJob = async (id) => {
+  try {
+    return await api.delete(`/jobs/${id}`);
+  } catch (error) {
+    return handleApiError(error, `Failed to delete job with ID: ${id}`);
+  }
+};
+
+const getActiveJobs = async () => {
+  try {
+    return await api.get('/jobs/active');
+  } catch (error) {
+    return handleApiError(error, 'Failed to fetch active jobs');
+  }
+};
+
+const exportJobs = async () => {
+  try {
+    return await api.get('/jobs/export');
+  } catch (error) {
+    return handleApiError(error, 'Failed to export jobs');
+  }
+};
+
+const getJobsByDateRange = async (startDate, endDate) => {
+  try {
+    const formattedStartDate = formatDateForAPI(startDate);
+    const formattedEndDate = formatDateForAPI(endDate);
+    return await api.get(`/jobs/date-range?start=${formattedStartDate}&end=${formattedEndDate}`);
+  } catch (error) {
+    return handleApiError(error, 'Failed to fetch jobs by date range');
+  }
+};
+
+const getJobsByStatus = async (status) => {
+  try {
+    return await api.get(`/jobs/status/${status}`);
+  } catch (error) {
+    return handleApiError(error, `Failed to fetch jobs with status: ${status}`);
+  }
+};
+
+const getJobsByCountry = async (country) => {
+  try {
+    return await api.get(`/jobs/country/${country}`);
+  } catch (error) {
+    return handleApiError(error, `Failed to fetch jobs for country: ${country}`);
+  }
 };
 
 const jobService = {
-  // Create job with proper validation and transformation
-  createJob: async (jobData) => {
-    try {
-      // Transform and validate the data
-      const transformedData = transformJobDataForAPI(jobData);
-      
-      // Send request
-      const response = await axiosInstance.post(JOB_API_URL, transformedData);
-      
-      return response.data;
-    } catch (error) {
-      handleError(error, 'Failed to create job');
-    }
-  },
-
-  getJobs: async (params = {}) => {
-    try {
-      const { page = 1, pageSize = 10, ...otherParams } = params;
-      
-      const queryParams = {
-        skip: (page - 1) * pageSize,
-        limit: pageSize,
-        ...otherParams
-      };
-
-      const response = await axiosInstance.get(JOB_API_URL, { params: queryParams });
-      
-      const items = Array.isArray(response.data) ? response.data : 
-                    Array.isArray(response.data.items) ? response.data.items : [];
-      
-      return {
-        items,
-        page,
-        page_size: pageSize,
-        total: response.data.total || items.length,
-        total_pages: response.data.total_pages || Math.ceil(items.length / pageSize)
-      };
-    } catch (error) {
-      handleError(error, 'Failed to fetch jobs');
-    }
-  },
-
-  getJob: async (jobId) => {
-    try {
-      const response = await axiosInstance.get(`${JOB_API_URL}/${jobId}`);
-      return response.data;
-    } catch (error) {
-      handleError(error, `Failed to fetch job ${jobId}`);
-    }
-  },
-
-  updateJob: async (jobId, jobData) => {
-    try {
-      const transformedData = transformJobDataForAPI(jobData);
-      const response = await axiosInstance.put(`${JOB_API_URL}/${jobId}`, transformedData);
-      return response.data;
-    } catch (error) {
-      handleError(error, `Failed to update job ${jobId}`);
-    }
-  }
+  getJobs,
+  getAllJobs,
+  getJobById,
+  createJob,
+  updateJob,
+  deleteJob,
+  getActiveJobs,
+  exportJobs,
+  getJobsByDateRange,
+  getJobsByStatus,
+  getJobsByCountry
 };
 
 export default jobService;

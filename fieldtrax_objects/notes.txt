@@ -1,0 +1,58 @@
+pip 
+py -m .\venv-fastapi\scripts\activate
+ pip install fastapi
+ pip install -U pip
+ pip install "uvicorn[standard]"
+
+ uvicorn main:app --reload
+
+
+ pip install datamodel-code-generator
+  datamodel-codegen --input jsonschema.json --output  models2.py
+
+
+  class Config:
+    use_enum_values = True
+    title = "Student Model"
+    extra = "allow"
+    anystr_upper = True
+
+ API TRAIINING
+ to create an enironment-->python -m venv <envname>
+pip install fastapi
+
+pip uninstall fastapi
+
+pip install -r requirements.txt
+
+Exceptions
+Status code
+  1xx - informational
+  2xx - success
+  3xx - redirection
+  4xx - Client error
+  5xx - Server error
+
+
+  Response types
+    plain text
+    xml
+    html
+    files
+    streaming
+
+
+Headers
+
+Cookies
+can accept str, list, dicty, models etc.
+
+response.set_cookie(key='test_cookie", value='test_cookie_value')
+
+test_cookie: Optional[Str] = Cookie(None)
+
+Form
+
+files
+
+def get_file(file: bytes)

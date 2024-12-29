@@ -1,40 +1,63 @@
-// File: /frontend/src/services/authService.js
-import { apiRequest } from '../utils/apiUtils';
+// File: /src/services/authService.js
+import api from './api';
 
 const authService = {
-  login: async (credentials) => {
+  /**
+   * Verify authentication status
+   * @returns {Promise<Object>} Authentication status
+   */
+  verifyAuth: async () => {
     try {
-      const response = await apiRequest('POST', '/login', credentials);
-      if (response.token) {
-        localStorage.setItem('user', JSON.stringify(response));
-        localStorage.setItem('token', response.token);
-      }
-      return response;
+      const response = await api.post('/auth/verify');
+      return response.data;
     } catch (error) {
+      console.error('Error verifying authentication:', error);
       throw error;
     }
   },
 
-  logout: () => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
-    window.location.href = '/login';
-  },
-
-  getCurrentUser: () => {
+  /**
+   * Logout user
+   * @returns {Promise<Object>} Logout response
+   */
+  logout: async () => {
     try {
-      const userStr = localStorage.getItem('user');
-      return userStr ? JSON.parse(userStr) : null;
+      const response = await api.post('/auth/logout');
+      return response.data;
     } catch (error) {
-      console.error('Error parsing user data:', error);
-      localStorage.removeItem('user');
-      return null;
+      console.error('Error logging out:', error);
+      throw error;
     }
   },
 
-  isAuthenticated: () => {
-    const user = authService.getCurrentUser();
-    return !!user;
+  /**
+   * Refresh access token
+   * @param {string} refreshToken Refresh token
+   * @returns {Promise<Object>} New session data
+   */
+  refreshToken: async (refreshToken) => {
+    try {
+      const response = await api.post('/auth/refresh', { refresh_token: refreshToken });
+      return response.data;
+    } catch (error) {
+      console.error('Error refreshing token:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Login user
+   * @param {Object} loginData Login data
+   * @returns {Promise<Object>} Session data
+   */
+  login: async (loginData) => {
+    try {
+      const response = await api.post('/auth/login', loginData);
+      return response.data;
+    } catch (error) {
+      console.error('Error logging in:', error);
+      throw error;
+    }
   }
 };
 

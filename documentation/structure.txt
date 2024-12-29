@@ -1,0 +1,44 @@
+backend/
+├── app/
+│   ├── models/
+│   │   ├── authsystem/
+│   │   │   ├── user.py
+│   │   │   ├── user_session.py
+│   │   │   └── password_reset.py
+│   │   │
+│   │   ├── jobsystem/
+│   │   │   ├── casing.py
+│   │   │   ├── contract_type.py
+│   │   │   ├── daily_report.py
+│   │   │   ├── field.py
+│   │   │   ├── fluid.py
+│   │   │   ├── hanger_info.py
+│   │   │   ├── installation_type.py
+│   │   │   ├── installation.py
+│   │   │   ├── job_center.py
+│   │   │   ├── job.py
+│   │   │   ├── mud_equipment_detail.py
+│   │   │   ├── mud_pump_detail.py
+│   │   │   ├── operational_parameter.py
+│   │   │   ├── operator.py
+│   │   │   ├── physical_barrier.py
+│   │   │   ├── production.py
+│   │   │   ├── job_parameter.py
+│   │   │   ├── seal_assembly.py
+│   │   │   └── slot.py
+│   │   │
+│   │   ├── logisticssystem/
+│   │   │   ├── backload.py
+│   │   │   ├── delivery_ticket.py
+│   │   │   ├── delivery_ticket_item.py
+│   │   │   ├── purchase_order.py
+│   │   │   └── purchase_order_item.py
+│   │   │
+│   │   └── rigsystem/
+│   │       ├── rig.py
+│   │       ├── rig_stability.py
+│   │       ├── rig_equipment.py
+│   │       ├── well_control_equipment.py
+│   │       ├── mud_pump.py
+│   │       ├── contractor.py
+│   │       └── rotary_equipment.py

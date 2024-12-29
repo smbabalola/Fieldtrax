@@ -1,10 +1,8 @@
 // src/services/settingsService.js
-import apiRequest from '../utils/apiUtils';
+import api from '../services/api';
 
-// Remove the /api/v1 prefix since it's in the baseURL
 const SETTINGS_BASE_URL = '/settings';
 
-// Default settings configuration
 const defaultSettings = {
   display: {
     sidebarOpen: true,
@@ -32,7 +30,6 @@ const defaultSettings = {
   }
 };
 
-// Helper to safely get stored settings
 const getStoredSettings = () => {
   try {
     const stored = localStorage.getItem('settings');
@@ -45,7 +42,6 @@ const getStoredSettings = () => {
   }
 };
 
-// Helper to safely store settings
 const storeSettings = (settings) => {
   try {
     localStorage.setItem('settings', JSON.stringify(settings));
@@ -57,117 +53,76 @@ const storeSettings = (settings) => {
 };
 
 const settingsService = {
-  // Expose default settings
   defaults: defaultSettings,
 
-  // Get all settings
   getSettings: async () => {
     try {
-      // First try to get from local storage
-      const storedSettings = getStoredSettings();
-      
-      // Then try to get from API
-      const response = await apiRequest.get(SETTINGS_BASE_URL);
-      const serverSettings = response.data || {};
-      
-      // Merge settings in priority order: defaults < stored < server
-      const mergedSettings = {
-        ...defaultSettings,
-        ...(storedSettings || {}),
-        ...serverSettings
-      };
-
-      // Store the merged settings
-      storeSettings(mergedSettings);
-      
-      return { data: mergedSettings };
+      const response = await api.get(SETTINGS_BASE_URL);
+      return response.data;
     } catch (error) {
       console.warn('Settings API error:', error);
-      
-      // If API fails, try to use stored settings
-      const storedSettings = getStoredSettings();
-      if (storedSettings) {
-        console.log('Using stored settings due to API error');
-        return {
-          data: {
-            ...defaultSettings,
-            ...storedSettings,
-            _source: 'cache'
-          }
-        };
-      }
-
-      // If no stored settings, use defaults
-      console.log('Using default settings');
-      return {
-        data: {
-          ...defaultSettings,
-          _source: 'defaults'
-        }
-      };
+      return null;
     }
   },
 
-  // Update settings
   updateSettings: async (settingsData) => {
     try {
-      // Validate input
-      if (!settingsData || typeof settingsData !== 'object') {
-        throw new Error('Invalid settings data');
-      }
-
-      // Send to API
-      const response = await apiRequest.put(SETTINGS_BASE_URL, settingsData);
-      const updatedSettings = response.data || {};
-      
-      // Merge with defaults and store
-      const mergedSettings = {
-        ...defaultSettings,
-        ...updatedSettings
-      };
-      storeSettings(mergedSettings);
-      
-      return { data: mergedSettings };
+      const response = await api.put(SETTINGS_BASE_URL, settingsData);
+      return response.data;
     } catch (error) {
-      console.error('Failed to update settings:', error);
+      console.warn('Error updating settings:', error);
+      return null;
+    }
+  },
+
+  resetSettings: async () => {
+    try {
+      const response = await api.post(`${SETTINGS_BASE_URL}/reset`);
+      return response.data;
+    } catch (error) {
+      console.warn('Failed to reset settings on server:', error);
+      return null;
+    }
+  },
+
+  getInitialSettings: () => {
+    const storedSettings = getStoredSettings();
+    return {
+      ...defaultSettings,
+      ...(storedSettings || {}),
+      _source: storedSettings ? 'cache' : 'defaults'
+    };
+  },
+
+  /**
+   * Get user-specific settings
+   * @param {string} userId User ID
+   * @returns {Promise<Object>} User settings
+   */
+  getUserSettings: async (userId) => {
+    try {
+      const response = await api.get(`${SETTINGS_BASE_URL}/user/${userId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching user settings:', error);
       throw error;
     }
   },
 
-  // Reset settings
-  resetSettings: async () => {
+  /**
+   * Update user-specific settings
+   * @param {string} userId User ID
+   * @param {Object} settingsData Settings data to update
+   * @returns {Promise<Object>} Updated settings
+   */
+  updateUserSettings: async (userId, settingsData) => {
     try {
-      // Call reset endpoint
-      await apiRequest.post(`${SETTINGS_BASE_URL}/reset`);
-      
-      // Clear stored settings
-      localStorage.removeItem('settings');
-      
-      return { data: defaultSettings };
+      const response = await api.put(`${SETTINGS_BASE_URL}/user/${userId}`, settingsData);
+      return response.data;
     } catch (error) {
-      console.warn('Failed to reset settings on server:', error);
-      
-      // Even if API fails, clear local storage and return defaults
-      localStorage.removeItem('settings');
-      return {
-        data: {
-          ...defaultSettings,
-          _source: 'defaults'
-        }
-      };
+      console.error('Error updating user settings:', error);
+      throw error;
     }
-  },
-
-  // Get initial settings (for app bootstrap)
-  getInitialSettings: () => {
-    const storedSettings = getStoredSettings();
-    return {
-      data: {
-        ...defaultSettings,
-        ...(storedSettings || {}),
-        _source: storedSettings ? 'cache' : 'defaults'
-      }
-    };
   }
 };
 
